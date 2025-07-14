@@ -60,7 +60,8 @@ class Magnetometer:
         return(self.data)
 
 if __name__ == "__main__":
-    compass = Magnetometer(46, 3, 5) # drdy could be anything, not used currently
+    compass = Magnetometer(46, 3, 1) # drdy could be anything, not used currently
     
     while True:
         print(compass.getdata_raw())
+        time.sleep(1)
