@@ -33,9 +33,9 @@ class Magnetometer:
         
         # Setting up the interrupt pin to know when data is ready from the chip
         self.int_pin = Pin(interrupt_pin, Pin.IN)
-        self.int_pin.irq(trigger=Pin.IRQ_FALLING, handler=self._newdatahandler())
+        self.int_pin.irq(trigger=Pin.IRQ_FALLING, handler=self._newdatahandler)
     
-    def _newdatahandler(self):
+    def _newdatahandler(self, pin):
         # This deals with interrupts when there is new data availible
         self.new_data = True
     
