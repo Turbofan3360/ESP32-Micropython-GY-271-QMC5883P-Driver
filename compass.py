@@ -22,7 +22,7 @@ class Magnetometer:
         
         self._modulesetup(drdy)
         
-    def _modulesetup(self):
+    def _modulesetup(self, interrupt_pin):
         # Setting the module to Normal power mode, 200Hz data output rate, x4 sensor reads per data output, down sampling = 0 (output every sample)
         self.qmc5883p.writeto_mem(self.qmc5883p_address, self.registers["control1"], bytes([0x1D]))
         # Setting the module to 2 Gauss range, "Set and Reset On" mode
@@ -44,12 +44,14 @@ class Magnetometer:
         y_axis = data[2:4]
         z_axis = data[4:]
         # Decoding the bytes data into signed ints, then converting the readings to Gauss
-        x_axis = struct.unpack("<h", x_axis)/15000
-        y_axis = struct.unpack("<h", y_axis)/15000
-        z_axis = struct.unpack("<h", z_axis)/15000
+        x_axis = struct.unpack("<h", x_axis)[0]/15000
+        y_axis = struct.unpack("<h", y_axis)[0]/15000
+        z_axis = struct.unpack("<h", z_axis)[0]/15000
         
         return x_axis, y_axis, z_axis
 
 
-if __name__ = "__main__":
-    compass = Magnetometer(scl, sda, drdy)
+if __name__ == "__main__":
+    compass = Magnetometer(46, 3, 5) # drdy could be anything, not used currently
+    
+    print(compass._read_data())
