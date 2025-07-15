@@ -1,5 +1,5 @@
 from machine import SoftI2C, Pin
-from math import atan2, sin, cos, pi
+from math import atan2, sin, asin, cos, pi
 import struct, time
 
 class Magnetometer:
