@@ -1,5 +1,5 @@
 from machine import SoftI2C, Pin
-from math import atan2, pi
+from math import atan2, sin, cos, pi
 import struct, time
 
 class Magnetometer:
@@ -75,10 +75,58 @@ class Magnetometer:
             heading -= 360
         
         return int(heading)
+    
+    def _quat_to_pitch_roll(self, q):
+        # Converting input quaternion into pitch and roll euler angles, using aerospace standard yaw-pitch-roll conversion (just ignoring the yaw bit as I don't need it)
+        qw, qx, qy, qz = q
+        
+        roll = atan2(2*(qw*qx + qy*qz), 1-2*(qx*qx + qy*qy))
+        
+        arg = 2*(qw*qy - qx*qz)
+        
+        if arg > 1:
+            arg = 1
+        elif arg < -1:
+            arg = -1
+        
+        pitch = asin(arg)
+        
+        return pitch, roll
+    
+    def _rotate_mag_readings(self, pitch, roll):
+        x, y, z = self.data
+        
+        # http://www.brokking.net/YMFC-32/YMFC-32_document_1.pdf
+        rx = x*cos(pitch) + y*sin(roll)*sin(pitch) - z*cos(roll)*sin(pitch)
+        ry = y*cos(roll) + z*sin(roll)
+            
+        return rx, ry
+    
+    def compass_3d(self, quat=None, pitch=None, roll=None, declination=0):
+        self._update_data()
+        
+        if quat == pitch == roll: # If you don't pass in either a quaternion, or pitch and roll values, then None is returned
+            return None
+        
+        # Checking which format orientation data was passed in - if it's quaternion, then that needs to be converted to pitch/roll values
+        if quat:
+            pitch, roll = self._quat_to_pitch_roll(quat)
+            
+        rx, ry = self._rotate_mag_readings(pitch, roll)
+        heading = atan2(ry, rx)*(180/pi) - declination
+        
+        # Ensuring heading goes from 0-360 degrees
+        if heading < 0:
+            heading += 360
+        elif heading > 360:
+            heading -= 360
+        
+        return heading
+        
 
 if __name__ == "__main__":
-    compass = Magnetometer(46, 3, 1) # drdy could be anything, not used currently
+    compass = Magnetometer(46, 3, 1)
     
     while True:
-        print(compass.compass_2d(1.43))
+        print(compass.compass_3d(declination=1.43)) # Need to combine with IMU to get orientation data
         time.sleep(1)
