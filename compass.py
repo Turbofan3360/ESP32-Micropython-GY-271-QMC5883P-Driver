@@ -32,8 +32,6 @@ class Magnetometer:
         self.qmc5883p.writeto_mem(self.qmc5883p_address, self.registers["control1"], bytes([0x1D]))
         # Setting the module to 2 Gauss range, "Set and Reset On" mode
         self.qmc5883p.writeto_mem(self.qmc5883p_address, self.registers["control2"], bytes([0x0C]))
-        # Inverting the Y-axis (makes it align with how I want)
-        self.qmc5883p.writeto_mem(self.qmc5883p_address, self.registers["axis invert"], bytes([0x01]))
         
         # Setting up the interrupt pin to know when data is ready from the chip
         self.int_pin = Pin(interrupt_pin, Pin.IN)
@@ -66,67 +64,62 @@ class Magnetometer:
     def compass_2d(self, declination=0):
         self._update_data()
         # Simple calculation of true heading (if you pass in a declination value) assuming the compass is level
-        heading = atan2(self.data[1], self.data[0])*(180/pi) - declination
+        heading = atan2(self.data[1], -self.data[0])*(180/pi) - declination
         
         # Ensuring heading values go from 0 to 360, rather than +180 to -180
-        if heading < 0:
-            heading += 360
-        elif heading > 360:
-            heading -= 360
+        heading %= 360
         
         return int(heading)
     
-    def _quat_to_pitch_roll(self, q):
-        # Converting input quaternion into pitch and roll euler angles, using aerospace standard yaw-pitch-roll conversion (just ignoring the yaw bit as I don't need it)
-        qw, qx, qy, qz = q
-        
-        roll = atan2(2*(qw*qx + qy*qz), 1-2*(qx*qx + qy*qy))
-        
-        arg = 2*(qw*qy - qx*qz)
-        
-        if arg > 1:
-            arg = 1
-        elif arg < -1:
-            arg = -1
-        
-        pitch = asin(arg)
-        
-        return pitch, roll
-    
     def _rotate_mag_readings(self, pitch, roll):
-        x, y, z = self.data
+        mx, my, mz = self.data
         
         # http://www.brokking.net/YMFC-32/YMFC-32_document_1.pdf
-        rx = x*cos(pitch) + y*sin(roll)*sin(pitch) - z*cos(roll)*sin(pitch)
-        ry = y*cos(roll) + z*sin(roll)
-            
+        rx = mx*cos(pitch) + my*sin(roll)*sin(pitch) - mz*cos(roll)*sin(pitch)
+        ry = my*cos(roll) + mz*sin(roll)
+        
         return rx, ry
     
-    def compass_3d(self, quat=None, pitch=None, roll=None, declination=0):
+    def _quat_rotate_mag_readings(self, q):
+        qw, qx, qy, qz = q
+        mx, my, mz = self.data
+        
+        # Rotate magnetometer vector into world reference frame
+        rx = (qw*qw + qx*qx - qy*qy - qz*qz)*mx + 2*(qx*qy - qw*qz)*my + 2*(qx*qz + qw*qy)*mz
+        ry = 2*(qx*qy + qw*qz)*mx + (qw*qw - qx*qx + qy*qy - qz*qz)*my + 2*(qy*qz - qw*qx)*mz
+        
+        return rx, ry
+    
+    def compass_3d(self, quat=None, pitch=None, roll=None, declination=0): # quaternion input as list [qw, qx, qy, qz], pitchroll values input in radians - NOT DEGREES
         self._update_data()
         
-        if quat == pitch == roll: # If you don't pass in either a quaternion, or pitch and roll values, then None is returned
+        if (not quat) and not (pitch or roll): # If you don't pass in quaternion, or pitch AND roll values, then None is returned
             return None
         
-        # Checking which format orientation data was passed in - if it's quaternion, then that needs to be converted to pitch/roll values
+        # Checking which format orientation data was passed in - if it's quaternion, then use a quaternion rotation. Otherwise a standard trig rotation is used
         if quat:
-            pitch, roll = self._quat_to_pitch_roll(quat)
-            
-        rx, ry = self._rotate_mag_readings(pitch, roll)
-        heading = atan2(ry, rx)*(180/pi) - declination
+            rx, ry = self._quat_rotate_mag_readings(quat)
+        else:
+            rx, ry = self._rotate_mag_readings(pitch, roll)
+        
+        heading = atan2(-ry, -rx)*(180/pi) - declination
         
         # Ensuring heading goes from 0-360 degrees
-        if heading < 0:
-            heading += 360
-        elif heading > 360:
-            heading -= 360
+        heading %= 360
         
-        return heading
+        return int(heading)
         
 
 if __name__ == "__main__":
+    import mpu6050 as MPU6050
+    
+    imu = MPU6050.MPU6050(41, 42)
+    imu.dmpsetup(2)
+    imu.calibrate(10)
+    
     compass = Magnetometer(46, 3, 1)
     
     while True:
-        print(compass.compass_3d(declination=1.43)) # Need to combine with IMU to get orientation data
+        quaternion, orientation, localvel, worldacc = imu.imutrack()
+        print(compass.compass_3d(quat=quaternion, declination=1.43)) # Need to combine with IMU to get orientation data
         time.sleep(1)
