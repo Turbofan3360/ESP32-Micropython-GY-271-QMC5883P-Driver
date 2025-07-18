@@ -69,7 +69,7 @@ class Magnetometer:
         # Ensuring heading values go from 0 to 360, rather than +180 to -180
         heading %= 360
         
-        return int(heading)
+        return int(heading+0.5) # Rounds to nearest degree
     
     def _rotate_mag_readings(self, pitch, roll):
         mx, my, mz = self.data
@@ -107,7 +107,7 @@ class Magnetometer:
         # Ensuring heading goes from 0-360 degrees
         heading %= 360
         
-        return int(heading)
+        return int(heading+0.5) # Rounds to nearest degree
         
 
 if __name__ == "__main__":
