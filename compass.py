@@ -102,7 +102,7 @@ class Magnetometer:
         else:
             rx, ry = self._rotate_mag_readings(pitch, roll)
         
-        heading = atan2(-ry, -rx)*(180/pi) - declination
+        heading = atan2(ry, -rx)*(180/pi) - declination
         
         # Ensuring heading goes from 0-360 degrees
         heading %= 360
@@ -122,4 +122,4 @@ if __name__ == "__main__":
     while True:
         quaternion, orientation, localvel, worldacc = imu.imutrack()
         print(compass.compass_3d(quat=quaternion, declination=1.43)) # Need to combine with IMU to get orientation data
-        time.sleep(1)
+        time.sleep(0.1)
