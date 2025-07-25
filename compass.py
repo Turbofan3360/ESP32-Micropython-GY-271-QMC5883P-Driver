@@ -1,18 +1,36 @@
 from machine import SoftI2C, Pin
-from math import atan2, sin, asin, cos, pi
+from math import atan2, pi
 import struct, time
 
 class Magnetometer:
     def __init__(self, scl, sda):
+        """
+        Driver for the QMC5883P magnetometer chip, commonly found on the GY-271 module.
+        
+        Required input parameters: SCL pin number, SDA pin number
+        
+        The chip is set up to the following parameters:
+         - Normal power mode
+         - 200Hz data output rate
+         - 4x sensor reads per data output
+         - No down sampling
+         - 2 Gauss sensor range
+         - Set and reset mode on
+        
+        Potential methods:
+            getdata_raw() - returns the raw magnetometer readings in Gauss
+            compass_2d(declination=...) - returns a heading rounded to the nearest degree (no pitch/roll compensation). Magnetic declination input optional.
+            compass_3d(q, declination=...) - returns a heading rounded to the nearest degree. Fully pitch/roll compensated. Quaternion orientation input required, magnetic declination optional.
+        """
         self.qmc5883p = SoftI2C(scl=Pin(scl), sda=Pin(sda), freq=400000)
         self.qmc5883p_address = 0x2C
     
         self.registers = {
                     "chipid" : 0x00,
                     
-                    "x-axis data" : 0x01, # Two bytes, LSB -> MSB
-                    "y-axis data" : 0x03, # ...
-                    "z-axis data": 0x05,  # ...
+                    "x-axis data" : 0x01,
+                    "y-axis data" : 0x03,
+                    "z-axis data": 0x05,
                     "axis invert" : 0x29,
                     
                     "status" : 0x09,
@@ -55,35 +73,10 @@ class Magnetometer:
         self.data[2] = z_axis
         
         return True
-                
-    def getdata_raw(self):
-        flag = self._update_data()
-        
-        return self.data
-    
-    def compass_2d(self, declination=0):
-        flag = self._update_data()
-        
-        # Simple calculation of true heading (if you pass in a declination value) assuming the compass is level
-        heading = atan2(self.data[1], -self.data[0])*(180/pi) - declination
-        
-        # Ensuring heading values go from 0 to 360, rather than +180 to -180
-        heading %= 360
-        
-        return int(heading+0.5) # Rounds to nearest degree
-    
-    def _rotate_mag_readings(self, pitch, roll):
-        mx, my, mz = self.data
-        
-        # http://www.brokking.net/YMFC-32/YMFC-32_document_1.pdf
-        rx = mx*cos(pitch) + my*sin(roll)*sin(pitch) - mz*cos(roll)*sin(pitch)
-        ry = my*cos(roll) + mz*sin(roll)
-        
-        return rx, ry
     
     def _quat_rotate_mag_readings(self, q):
         qw, qx, qy, qz = q
-        mx, my, mz = self.data
+        mx, my, mz = self._normalize(self.data)
         
         # Rotate magnetometer vector into world reference frame
         rx = (qw*qw + qx*qx - qy*qy - qz*qz)*mx + 2*(qx*qy - qw*qz)*my + 2*(qx*qz + qw*qy)*mz
@@ -91,16 +84,77 @@ class Magnetometer:
         
         return rx, ry
     
-    def compass_3d(self, quat=None, pitch=None, roll=None, declination=0): # quaternion input as list [qw, qx, qy, qz], pitchroll values input in radians - NOT DEGREES
-        flag = self._update_data() # Updating data
+    def _world_heading_vector(self, q):
+        qw, qx, qy, qz = q
+        local_heading = [-1, 0, 0]
         
-        # Checking which format orientation data was passed in - if it's quaternion, then use a quaternion rotation. Otherwise a standard trig rotation is used
-        if quat:
-            rx, ry = self._quat_rotate_mag_readings(quat)
-        else:
-            rx, ry = self._rotate_mag_readings(pitch, roll)
+        # Using quaternion rotation to find the world x/y heading vector
+        wx = (qw*qw + qx*qx - qy*qy - qz*qz)*local_heading[0] + 2*(qx*qy - qw*qz)*local_heading[1] + 2*(qx*qz + qw*qy)*local_heading[2]
+        wy = 2*(qx*qy + qw*qz)*local_heading[0] + (qw*qw - qx*qx + qy*qy - qz*qz)*local_heading[1] + 2*(qy*qz - qw*qx)*local_heading[2]
         
-        heading = atan2(ry, -rx)*(180/pi) - declination
+        return wx, wy
+    
+    def _normalize(self, vector):
+        v1, v2, v3 = vector
+        
+        length = v1*v1 + v2*v2 + v3*v3
+        length = length**0.5
+        
+        v1 /= length
+        v2 /= length
+        v3 /= length
+        
+        return [v1, v2, v3]
+                
+    def getdata_raw(self):
+        """
+        Returns the raw magnetometer data in Gauss. Takes no parameters.
+        
+        Output is as a [magnetometer_x, magnetometer_y, magnetometer_z] list
+        """
+        flag = self._update_data()
+        
+        return self.data
+    
+    def compass_2d(self, declination=0):
+        """
+        Basic compass that doesn't include any pitch/roll compensation so only accurate when level. North is taken as the negative x-axis.
+        
+        Can take a parameter, declination (input as degrees, e.g. 1.5), which is different in every location. Default value is 0. If declination is given, then the output heading will be a true heading, instead of magnetic.
+        
+        Outputs a compass heading rounded to the nearest degree.
+        """
+        
+        flag = self._update_data()
+        
+        heading = atan2(self.data[1], -self.data[0])*(180/pi) - declination
+        
+        # Ensuring heading values go from 0 to 360
+        heading %= 360
+        
+        return int(heading+0.5) # Rounds to nearest degree
+    
+    def compass_3d(self, quat, declination=0):
+        """
+        Fully pitch and roll compensated compass, which is accurate at all orientations of the sensor. North is taken as the negative x-axis.
+        
+        Required parameter: Quaternion orientation of the sensor - formatted as a list [qw, qx, qy, qz]
+        Optional parameter: Magnetic declination (input as degrees, e.g. 1.5), which is different in every location. Default value is 0. If declination is given, then the output heading will be a true heading, instead of magnetic.
+        
+        Outputs a compass heading rounded to the nearest degree.
+        """
+        
+        flag = self._update_data()
+        
+        rx, ry = self._quat_rotate_mag_readings(quat) # Magnetic north direction vector - vector=[rx, ry, 0]
+            
+        wx, wy = self._world_heading_vector(quat) # Device forward direction vector - vector=[wx, wy, 0]
+        
+        dot_product = rx*wx + ry*wy # Dot product between the world heading vector and magnetic north direction vector
+        cross_product_z = rx*wy - ry*wx # Cross product z component (x and y are 0)
+        
+        heading = atan2(cross_product_z, dot_product) * (180/pi) - declination
+        # Heading calc maths: cross product = |a|*|b|*sin(theta), dot product = |a|*|b|*cos(theta), so atan(crossproduct/dotproduct)=atan(sin(theta)/cos(theta))=atan(tan(theta))=theta
         
         # Ensuring heading goes from 0-360 degrees
         heading %= 360
