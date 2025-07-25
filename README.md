@@ -40,4 +40,4 @@ The QMC5883P chip is configured to the following settings:
 
  - Datasheet: <https://www.qstcorp.com/upload/pdf/202202/%EF%BC%88%E5%B7%B2%E4%BC%A0%EF%BC%8913-52-19%20QMC5883P%20Datasheet%20Rev.C(1).pdf>
  - Guide to calibration: <https://www.appelsiini.net/2018/calibrate-magnetometer/>
- -  [1]: <http://www.brokking.net/YMFC-32/YMFC-32_document_1.pdf>
+[1]: <http://www.brokking.net/YMFC-32/YMFC-32_document_1.pdf>
