@@ -6,7 +6,7 @@ This code is a driver for the QMC5883P magnetometer chip, commonly found on the 
 
 The compass_2d method uses a basic algorithm to determine the module's heading (taking the chip's negative x axis pointing north as 0 degrees), which assumes that the module is flat. The heading returned is rounded to the nearest degree. You can input the magnetic declination for your location to make the method output true heading, rather than magnetic heading.
 
-The compass_3d method uses a more complex algorithm, and takes a quaternion orientation input (typically gathered from an IMU such as the MPU-6050 I am using). This allows the algorithm to compensate for the sensor's pitch and roll angles - which affect the magnetometer readings - and produce a much more accurate heading (rounded to the nearest degree again), no matter the sensor's orientation. This method could easily be adapted to take pitch and roll Euler angles as input, rather than a quaternion, using the algorithms laid out here: <http://www.brokking.net/YMFC-32/YMFC-32_document_1.pdf> to replace the quaternion rotations of the magnetometer and heading vectors.
+The compass_3d method uses a more complex algorithm, and takes a quaternion orientation input (typically gathered from an IMU such as the MPU-6050 I am using). This allows the algorithm to compensate for the sensor's pitch and roll angles - which affect the magnetometer readings - and produce a much more accurate heading (rounded to the nearest degree again), no matter the sensor's orientation. This method could easily be adapted to take pitch and roll Euler angles as input, rather than a quaternion, using the algorithms laid out here [^1] to replace the quaternion rotations of the magnetometer and heading vectors.
 
 You can also get raw magnetometer data out if you want to do outher things with the data - use the getdata_raw method for this. The readings are returned in Gauss, with a 2G range.
 
@@ -40,4 +40,4 @@ The QMC5883P chip is configured to the following settings:
 
  - <https://www.qstcorp.com/upload/pdf/202202/%EF%BC%88%E5%B7%B2%E4%BC%A0%EF%BC%8913-52-19%20QMC5883P%20Datasheet%20Rev.C(1).pdf>
  - <https://www.appelsiini.net/2018/calibrate-magnetometer/>
- - <http://www.brokking.net/YMFC-32/YMFC-32_document_1.pdf>
+ - <http://www.brokking.net/YMFC-32/YMFC-32_document_1.pdf> [^1]
