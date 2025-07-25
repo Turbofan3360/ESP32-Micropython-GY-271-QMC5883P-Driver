@@ -1,6 +1,6 @@
-### ESP32 Micropython Magnetomter Driver (GY-271 module with QMC5883P chip) ###
+# ESP32 Micropython Magnetomter Driver (GY-271 module with QMC5883P chip) #
 
-# The Code: # 
+### The Code: ### 
 
 This code is a driver for the QMC5883P magnetometer chip, commonly found on the GY-271 module, designed to run on an ESP32 in micropython. The code configures the module to the settings described below, and provides methods that allow you to get raw magnetometer readings (in Gauss) out, or allow the module to act as a compass (either pitch/roll compensated, or not).
 
@@ -12,7 +12,7 @@ You can also get raw magnetometer data out if you want to do outher things with 
 
 _NOTE:_ Calibration methods are not currently included. They will be added in the future
 
-# Example Usage: #
+### Example Usage: ###
 
 ```micropython
 gy271 = Magnetometer(42, 24)
@@ -26,7 +26,7 @@ heading_3d = gy271.compass_3d(q, declination=1.5)
 
 The two parameters that must be given to initialse the driver are the magnetometer's SCL and SDA pin numbers, in that order.
 
-# Module Configuration Settings: # 
+### Module Configuration Settings: ###
 
 The QMC5883P chip is configured to the following settings:
  - Normal power mode
@@ -36,7 +36,7 @@ The QMC5883P chip is configured to the following settings:
  - 2 Gauss sensor range
  - Set and reset mode on
 
-# References: #
+### References: ###
 
  - <https://www.qstcorp.com/upload/pdf/202202/%EF%BC%88%E5%B7%B2%E4%BC%A0%EF%BC%8913-52-19%20QMC5883P%20Datasheet%20Rev.C(1).pdf>
  - <https://www.appelsiini.net/2018/calibrate-magnetometer/>
