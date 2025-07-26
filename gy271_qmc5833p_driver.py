@@ -58,6 +58,7 @@ class Magnetometer:
         
         self._log("Module setup complete")
     
+    @micropython.native
     def _update_data(self):
         counter = 0
         
@@ -82,6 +83,7 @@ class Magnetometer:
         
         return True
     
+    @micropython.native
     def _quat_rotate_mag_readings(self, q):
         qw, qx, qy, qz = q
         mx, my, mz = self._normalize(self.data)
@@ -92,6 +94,7 @@ class Magnetometer:
         
         return rx, ry
     
+    @micropython.native
     def _world_heading_vector(self, q):
         qw, qx, qy, qz = q
         local_heading = [-1, 0, 0]
@@ -102,6 +105,7 @@ class Magnetometer:
         
         return wx, wy
     
+    @micropython.native
     def _normalize(self, vector):
         v1, v2, v3 = vector
         
@@ -122,6 +126,8 @@ class Magnetometer:
         y_values.append(self.data[1])
         z_values.append(self.data[2])
         
+        self._log("Begin compass rotation")
+        
         while not(xcomplete and ycomplete and zcomplete):
             axes_complete = 0
             flag = self._update_data()
@@ -132,13 +138,16 @@ class Magnetometer:
                 y_values.append(self.data[1])
             if not zcomplete:
                 z_values.append(self.data[2])
-            
+                        
             if (max(x_values)-min(x_values)) > 0.9*2*fieldstrength and x_values[-1] > x_values[0]-0.1: # Detecting if that axis has had a full rotation and returned to the starting point
                 xcomplete = True
+                self._log("X axis complete")
             if (max(y_values)-min(y_values)) > 0.9*2*fieldstrength and y_values[-1] > y_values[0]-0.1:
                 ycomplete = True
+                self._log("Y axis complete")
             if (max(z_values)-min(z_values)) > 0.9*2*fieldstrength and z_values[-1] > z_values[0]-0.1:
                 zcomplete = True
+                self._log("Z axis complete")
                 
             time.sleep_ms(10)
             
@@ -201,7 +210,7 @@ class Magnetometer:
             
             time.sleep_ms(5) # sensor operates at 200Hz - 4 milliseconds between new sensor data
             
-        fieldstrength /= number_readings
+        fieldstrength /= number_readings_fieldstrength
         
         self._log("Field strength determined")
         
@@ -252,6 +261,7 @@ class Magnetometer:
         
         return int(heading+0.5) # Rounds to nearest degree
     
+    @micropython.native
     def compass_3d(self, quat, declination=0):
         """
         Fully pitch and roll compensated compass, which is accurate at all orientations of the sensor. North is taken as the negative x-axis.
