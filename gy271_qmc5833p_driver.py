@@ -288,6 +288,7 @@ if __name__ == "__main__":
     imu.calibrate(10)
     
     compass = Magnetometer(46, 3)
+    compass.calibrate(1)
     
     while True:
         quaternion, orientation, localvel, worldacc = imu.imutrack()
