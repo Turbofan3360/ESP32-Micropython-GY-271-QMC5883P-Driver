@@ -215,9 +215,9 @@ class Magnetometer:
         self._log("Field strength determined")
         
         # Finding the average sensor range per axis
-        for i in range(calibrationrotations):
+        for i in range(calibrationrotations+1):
             x, y, z = self._axes_calibration_rotations(fieldstrength)
-            self._log("Calibration rotation {} complete".format(i))
+            self._log("Calibration rotation {} complete".format(i+1))
             
             x_values.extend(x) # Adding data from next rotation to the arrays
             y_values.extend(y)
