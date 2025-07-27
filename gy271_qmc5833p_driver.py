@@ -227,10 +227,12 @@ class Magnetometer:
         y_values = sorted(y_values)
         z_values = sorted(z_values)
         
-        self._hard_offsets(x_values, y_values, z_values, calibrationrotations)
+        num_readings = max(calibrationrotations, int(((len(x_values)+len(y_values)+len(z_values))/3)//20)) # EITHER use the largest/smallest 5% of the average dataset length, OR the number of rotation sequences
+        
+        self._hard_offsets(x_values, y_values, z_values, num_readings)
         self._log("Hard iron calibration complete")
         
-        self._soft_offsets(x_values, y_values, z_values, calibrationrotations)
+        self._soft_offsets(x_values, y_values, z_values, num_readings)
         self._log("Soft iron calibration complete")
             
     def getdata_raw(self):
