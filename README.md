@@ -14,7 +14,7 @@ Calibration is done by calling the calibrate() method. The algorithm here compen
 
 ### Example Usage: ###
 
-```micropython
+```python3
 gy271 = Magnetometer(42, 24)
 
 q = imu.getorientation() # For example
