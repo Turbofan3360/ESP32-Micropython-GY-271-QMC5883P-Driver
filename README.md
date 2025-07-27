@@ -10,7 +10,7 @@ The compass_3d method uses a more complex algorithm, and takes a quaternion orie
 
 You can also get raw magnetometer data out if you want to do outher things with the data - use the getdata_raw method for this. The readings are returned in Gauss, with a 2G range.
 
-_NOTE:_ Calibration methods are not currently included. They will be added in the future
+Calibration is done by calling the calibrate() method. The algorithm here compensates for both hard and soft iron effects - see the references for a detailed guide to magnetometer calibration. This code gets you to rotate the sensor - you need to rotate it 360 degrees around one axis (x, y or z) and then 360 degrees around a different axis, to complete a calibration rotation. The code provides a user output to let you know what it's up to. The code may complete calibration before you've done the full 360 degree rotation - this is not an issue. Calibration does not have to be completed to use the sensor, but is suggested - particularly for compass applications.
 
 ### Example Usage: ###
 
@@ -18,6 +18,8 @@ _NOTE:_ Calibration methods are not currently included. They will be added in th
 gy271 = Magnetometer(42, 24)
 
 q = imu.getorientation() # For example
+
+gy271.calibrate(calibrationrotations=1) # Optional parameter to tell the code to only complete one set of calibration rotations - default value is 2.
 
 data = gy271.getdata_raw()
 heading_2d = gy271.compass_2d(declination=1.5)
