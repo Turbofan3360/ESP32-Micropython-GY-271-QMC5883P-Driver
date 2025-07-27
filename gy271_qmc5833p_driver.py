@@ -138,14 +138,14 @@ class Magnetometer:
                 y_values.append(self.data[1])
             if not zcomplete:
                 z_values.append(self.data[2])
-                        
-            if (max(x_values)-min(x_values)) > 0.9*2*fieldstrength and x_values[-1] > x_values[0]-0.1: # Detecting if that axis has had a full rotation and returned to the starting point
+            
+            if (max(x_values)-min(x_values)) > 0.8*2*fieldstrength and abs(x_values[-1] - x_values[0]) < 0.1 and not xcomplete: # Detecting if that axis has had a full rotation and returned to the starting point. Only triggers once
                 xcomplete = True
                 self._log("X axis complete")
-            if (max(y_values)-min(y_values)) > 0.9*2*fieldstrength and y_values[-1] > y_values[0]-0.1:
+            if (max(y_values)-min(y_values)) > 0.8*2*fieldstrength and abs(y_values[-1] - y_values[0]) < 0.1 and not ycomplete:
                 ycomplete = True
                 self._log("Y axis complete")
-            if (max(z_values)-min(z_values)) > 0.9*2*fieldstrength and z_values[-1] > z_values[0]-0.1:
+            if (max(z_values)-min(z_values)) > 0.8*2*fieldstrength and abs(z_values[-1] - z_values[0]) < 0.1 and not zcomplete:
                 zcomplete = True
                 self._log("Z axis complete")
                 
