@@ -43,7 +43,8 @@ class Magnetometer:
         self.softcal = [1, 1, 1]
         self.hardcal = [0, 0, 0]
         
-        time.sleep_us(250) # Module needs about 250 microseconds to boot up from power on -> being able to receive I2C comms
+        # Module needs about 250 microseconds to boot up from power on -> being able to receive I2C comms
+        time.sleep_us(250)
         
         self._modulesetup()
     
@@ -62,8 +63,10 @@ class Magnetometer:
     def _update_data(self):
         counter = 0
         
-        while not(self.qmc5883p.readfrom_mem(0x2C, 0x09, 1)[0] & 0x01): # Checking the DRDY bit of the status register - if no new data, wait a bit then check again
-            time.sleep_us(5) # 1/200 of a second - time it should take for a measurement
+        # Checking the DRDY bit of the status register - if no new data, wait a bit then check again
+        while not(self.qmc5883p.readfrom_mem(0x2C, 0x09, 1)[0] & 0x01):
+            # 1/200 of a second - time it should take for a measurement
+            time.sleep_us(5)
             counter += 1
             
             if counter > 2:
@@ -139,7 +142,8 @@ class Magnetometer:
             if not zcomplete:
                 z_values.append(self.data[2])
             
-            if (max(x_values)-min(x_values)) > 0.8*2*fieldstrength and abs(x_values[-1] - x_values[0]) < 0.1 and not xcomplete: # Detecting if that axis has had a full rotation and returned to the starting point. Only triggers once
+            # Detecting if that axis has had a full rotation and returned to the starting point. Only triggers once
+            if (max(x_values)-min(x_values)) > 0.8*2*fieldstrength and abs(x_values[-1] - x_values[0]) < 0.1 and not xcomplete:
                 xcomplete = True
                 self._log("X axis complete")
             if (max(y_values)-min(y_values)) > 0.8*2*fieldstrength and abs(y_values[-1] - y_values[0]) < 0.1 and not ycomplete:
@@ -276,20 +280,24 @@ class Magnetometer:
         
         flag = self._update_data()
         
-        rx, ry = self._quat_rotate_mag_readings(quat) # Magnetic north direction vector - vector=[rx, ry, 0]
+        # Magnetic north direction vector - vector=[rx, ry, 0]
+        rx, ry = self._quat_rotate_mag_readings(quat)
             
-        wx, wy = self._world_heading_vector(quat) # Device forward direction vector - vector=[wx, wy, 0]
+        # Device forward direction vector - vector=[wx, wy, 0]
+        wx, wy = self._world_heading_vector(quat)
         
-        dot_product = rx*wx + ry*wy # Dot product between the world heading vector and magnetic north direction vector
-        cross_product_z = rx*wy - ry*wx # Cross product z component (x and y are 0)
+        # Dot product between the world heading vector and magnetic north direction vector
+        dot_product = rx*wx + ry*wy
+        # Cross product z component (x and y are 0)
+        cross_product_z = rx*wy - ry*wx
         
         heading = atan2(cross_product_z, dot_product) * (180/pi) - declination
         # Heading calc maths: cross product = |a|*|b|*sin(theta), dot product = |a|*|b|*cos(theta), so atan(crossproduct/dotproduct)=atan(sin(theta)/cos(theta))=atan(tan(theta))=theta
         
         # Ensuring heading goes from 0-360 degrees
         heading %= 360
-        
-        return int(heading+0.5) # Rounds to nearest degree
+        # Rounds to nearest degree
+        return int(heading+0.5)
         
 
 if __name__ == "__main__":
