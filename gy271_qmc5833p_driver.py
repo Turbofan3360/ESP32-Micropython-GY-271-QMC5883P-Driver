@@ -292,7 +292,8 @@ class Magnetometer:
         cross_product_z = rx*wy - ry*wx
         
         heading = atan2(cross_product_z, dot_product) * (180/pi) - declination
-        # Heading calc maths: cross product = |a|*|b|*sin(theta), dot product = |a|*|b|*cos(theta), so atan(crossproduct/dotproduct)=atan(sin(theta)/cos(theta))=atan(tan(theta))=theta
+        # Heading calc maths: cross product = |a|*|b|*sin(theta), dot product = |a|*|b|*cos(theta)
+        # So atan(crossproduct/dotproduct)=atan(sin(theta)/cos(theta))=atan(tan(theta))=theta
         
         # Ensuring heading goes from 0-360 degrees
         heading %= 360
