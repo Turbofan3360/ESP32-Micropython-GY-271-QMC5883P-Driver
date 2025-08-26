@@ -1,4 +1,8 @@
 #include <stdint.h>
+#include <math.h>
+
+#include "py/dynruntime.h"
+#include "py/mphal.h"
 
 // Register address definitions
 #define CHIPID_REG 0x00;
@@ -9,6 +13,10 @@
 #define STATUS_REG 0x09;
 #define CONTROL_1_REG 0x0A;
 #define CONTROL_2_REG 0x0B;
+
+// Constant definitions
+#define M_PI 3.14159265358979323846
+#define RAD_TO_DEG 180/M_PI;
 
 typedef struct _qmc5883p_obj_t {
 	mp_obj_base_t base;

@@ -1,13 +1,12 @@
-#include "py/dynruntime.h"
-#include "py/mphal.h"
 #include "gy271_qmc5833p_driver.h"
 
 mp_obj_t mpy_init(mp_obj_fun_bc_t *self, size_t n_args, size_t n_kw, mp_obj_t *args){
 	MP_DYNRUNTIME_INIT_ENTRY;
 
-    // Making functions available in python namespace
+    // Make functions dynamically available in python namespace here if needed
 
     MP_DYNRUNTIME_INIT_EXIT;
+
     return mp_const_none;
 }
 
@@ -27,12 +26,12 @@ static mp_obj_t qmc5883p_make_new(const mp_obj_type_t *type, size_t n_args, size
 
     mp_hal_delay_us(250);
 
-    magnetometer_setup(*self);
+    magnetometer_setup(self);
 
     return MP_OBJ_FROM_PTR(self);
 }
 
-static void magnetometer_setup(qmc5883p_obj_t self){
+static void magnetometer_setup(qmc5883p_obj_t *self){
 	// Loading writeto_mem method
     mp_obj_t writeto_method[2];
     mp_load_method(self->i2c_bus, MP_QSTR_writeto_mem, writeto_method);
@@ -47,7 +46,7 @@ static void magnetometer_setup(qmc5883p_obj_t self){
     mp_call_function_n_kw(writeto_method[0], 3, 0, control2_data);
 }
 
-static uint8_t *bytearray_to_array(mp_obj_t bytearray){
+static uint8_t* bytearray_to_array(mp_obj_t bytearray){
     int i;
 
     // Utility to convert from a mp_obj_t bytearray to C array type
@@ -64,39 +63,97 @@ static uint8_t *bytearray_to_array(mp_obj_t bytearray){
         mp_raise_OSError(MP_ENOMEM);
     }
 
-    for (i=0, i < length, i++){
+    for (i=0; i < length; i++){
         buffer[i] = data[i];
     }
 
     return buffer;
 }
 
-static int update_data(qmc5883p_obj_t *self){
-    mp_obj_t statusreg_data;
-    mp_obj_t mag_data;
-    uint8_t statusreg_int;
-    uint8_t *statusreg_intdata;
-    uint8_t *mag_intdata;
+static float* mp_array_to_c_array(mp_obj_t array){
+    size_t len;
+    mp_obj_t *items;
+    int i;
+    float *buffer = malloc(4*sizeof(float));
 
-    float xdata, ydata, zdata;
+    mp_obj_get_array(array, &len, &items);
 
+    if (len != 4){
+        mp_raise_ValueError("Expected 4 values in list/tuple");
+    }
+
+    for (i=0; i < 4; i++){
+        buffer[i] = mp_obj_get_float(items[i]);
+    }
+
+    return buffer;
+}
+
+static float* normalize_vector(float *vector){
+    float sum_sq, sum;
+    float *vector_normalized = malloc(3*sizeof(float));
+
+    sum_sq = vector[0]*vector[0] + vector[1]*vector[1] + vector[2]*vector[2];
+    sum = sqrt(sum_sq);
+
+    vector_normalized[0] = vector[0] / sum;
+    vector_normalized[1] = vector[1] / sum;
+    vector_normalized[2] = vector[2] / sum;
+
+    return vector_normalized;
+}
+
+static float quat_rotate_mag_readings(qmc5883p_obj_t *self, float *quaternion){
+    float qw, qx, qy, qz;
+    float world_magnetometer[2];
+    float *normalized_mag;
+
+    qw = quaternion[0];
+    qx = quaternion[1];
+    qy = quaternion[2];
+    qz = quaternion[3];
+
+    normalized_mag = normalize_vector(self->data);
+
+    // Using quaternion rotation to find the magnetic north direction vector in the world reference frame
+    world_magnetometer[0] = (qw*qw + qx*qx - qy*qy - qz*qz)*normalized_mag[0] + 2*(qx*qy - qw*qz)*normalized_mag[1] + 2*(qx*qz + qw*qy)*normalized_mag[2];
+    world_magnetometer[1] = 2*(qx*qy + qw*qz)*normalized_mag[0] + (qw*qw - qx*qx + qy*qy - qz*qz)*normalized_mag[1] + 2*(qy*qz - qw*qx)*normalized_mag[2];
+
+    free(normalized_mag_readings)
+
+    return world_magnetometer;
+}
+
+static float heading_vector(qmc5883p_obj_t *self, float *quaternion){
+    float qw, qx, qy, qz;
+    float world_heading[2];
+
+    qw = quaternion[0];
+    qx = quaternion[1];
+    qy = quaternion[2];
+    qz = quaternion[3];
+
+    // Using quaternion rotation to find the magnetometer's heading vector in the world reference frame
+    world_heading[0] = (qw*qw + qx*qx - qy*qy - qz*qz)*-1.0f;
+    world_heading[1] = (qx*qy + qw*qz)*-2.0f;
+
+    return world_heading;
+}
+
+static int check_drdy(qmc5883p_obj_t *self){
     mp_obj_t readfrom_method[2];
+    mp_obj_t statusreg_data;
+    uint8_t *statusreg_intdata;
+    uint8_t statusreg_int;
     int counter = 0;
-    int drdy = 0;
 
     mp_load_method(self->i2c_bus, MP_QSTR_readfrom_mem, readfrom_method);
     mp_obj_t arguments[3] = {mp_obj_new_int(self->address), mp_obj_new_int(STATUS_REG), mp_obj_new_int(1)};
 
     // Checking the DRDY bit of status register
-    while (drdy != 1){
-        mp_hal_delay_us(5);
-
+    while (counter <= 2){
         // Making sure that the loop times out after two attempts
         counter ++;
-
-        if (counter > 2){
-            return 0;
-        }
 
         // Reading from the sensor, then checking the bit
         statusreg_data = mp_call_function_n_kw(readfrom_method[0], 3, 0, arguments);
@@ -106,8 +163,29 @@ static int update_data(qmc5883p_obj_t *self){
         free(statusreg_intdata);
 
         if (statusreg_int & 0x01){
-            drdy = 1;
+            return 1;
         }
+        else {
+            mp_hal_delay_ms(5);
+        }
+    }
+
+    return 0;
+}
+
+static int update_data(qmc5883p_obj_t *self){
+    mp_obj_t mag_data;
+    mp_obj_t readfrom_method[2];
+    uint8_t *mag_intdata;
+    float xdata, ydata, zdata;
+    int flag;
+
+    mp_load_method(self->i2c_bus, MP_QSTR_readfrom_mem, readfrom_method);
+
+    // Checking if there's new data available
+    flag = check_drdy(self);
+    if (flag == 0){
+        return 0;
     }
 
     // Burst reading the 6 data bytes from the sensor
@@ -133,3 +211,99 @@ static int update_data(qmc5883p_obj_t *self){
 
     return 1;
 }
+
+static mp_obj_t getdata_raw(mp_obj_t self_in){
+    int flag;
+    mp_obj_t data_array[3];
+
+    qmc5883p_obj_t *self = MP_OBJ_TO_PTR(self_in);
+
+    flag = update_data(self);
+
+    // Creating an array of python floats to return
+    data_array[0] = mp_obj_new_float(self->data[0]);
+    data_array[1] = mp_obj_new_float(self->data[1]);
+    data_array[2] = mp_obj_new_float(self->data[2]);
+
+    return mp_obj_new_list(3, data_array);
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(qmc5883p_getdata_raw_obj, getdata_raw);
+
+static mp_obj_t compass_2d(mp_obj_t self_in, mp_obj_t dec){
+    qmc5883p_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    float declination = mp_obj_get_float(dec);
+    float heading;
+    uint16_t heading_rounded;
+    int flag;
+
+    flag = update_data(self);
+
+    // Calculating heading
+    heading = (atan2f(self->data[1], -self->data[0]) * RAD_TO_DEG) - declination;
+
+    // Ensuring heading goes from 0 -> 360 degrees
+    heading %= 360;
+
+    // Rounding heading to nearest degree
+    heading_rounded = uint16_t(heading+0.5f);
+
+    return mp_obj_new_int_from_uint(heading_rounded);
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(qmc5883p_compass_2d_obj, compass_2d);
+
+static mp_obj_t compass_3d(mp_obj_t self_in, mp_obj_t quaternion, mp_obj_t dec){
+    qmc5883p_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    float declination = mp_obj_get_float(dec);
+    float *quat, mag_directionvector[2], headingvector[2];
+    float dotproduct, crossproduct_z, heading;
+    uint16_t heading_rounded;
+    int flag;
+
+    quat = mp_array_to_c_array(quaternion);
+
+    flag = update_data(self);
+
+    mag_directionvector = quat_rotate_mag_readings(self, quat);
+    headingvector = heading_vector(self, quat);
+
+    // Heading calc maths: cross product = |a|*|b|*sin(theta), dot product = |a|*|b|*cos(theta)
+    // So atan(crossproduct/dotproduct)=atan(sin(theta)/cos(theta))=atan(tan(theta))=theta
+    // I.e. this code finds the angle between the magnetic north direction vector, and the module's heading_vector
+    dotproduct = mag_directionvector[0]*headingvector[0] + mag_directionvector[1]*headingvector[1];
+    crossproduct_z = mag_directionvector[0]*headingvector[1] - mag_directionvector[1]*headingvector[0];
+
+    heading = (atan2f(crossproduct_z, dotproduct) * RAD_TO_DEG) - declination;
+
+    // Ensuring heading goes from 0->360 degrees
+    heading %= 360;
+    heading_rounded = uint16_t(heading_rounded+0.5f);
+
+    free(quat);
+
+    return heading_rounded;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_2(qmc5883p_compass_3d_obj, compass_3d);
+
+
+// TODO: ADD ERROR HANDLING
+// TODO: FIGURE OUT HOW TO DO LOGGING
+// TODO: ADD CALIBRATION FUNCTION
+
+
+
+
+// Defining the functions that are exposed to micropython
+STATIC const mp_rom_map_elem_t qmc5883p_locals_dict_table[] = {
+    {MP_ROM_QSTR(MP_QSTR_getdata_raw), MP_ROM_PTR(&qmc5883p_getdata_raw_obj)},
+    {MP_ROM_QSTR(MP_QSTR_compass_2d), MP_ROM_PTR(&qmc5883p_compass_2d_obj)},
+    {MP_ROM_QSTR(MP_QSTR_compass_3d), MP_ROM_PTR(&qmc5883p_compass_3d_obj)},
+};
+STATIC MP_DEFINE_CONST_DICT(qmc5883p_locals_dict, qmc5883p_locals_dict_table);
+
+// Overall module definition
+const mp_obj_type_t qmc5883p = {
+    .base = {&mp_type_module},
+    .name = MP_QSTR_QMC5883P,
+    .make_new = qmc5883p_make_new,
+    .locals_dict = (mp_obj_dict_t *)&qmc5883p_locals_dict,
+};
