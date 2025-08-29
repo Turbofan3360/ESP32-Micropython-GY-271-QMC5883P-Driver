@@ -3,6 +3,7 @@
 
 #include "py/dynruntime.h"
 #include "py/mphal.h"
+#include "py/nlr.h"
 
 // Register address definitions
 #define CHIPID_REG 0x00;

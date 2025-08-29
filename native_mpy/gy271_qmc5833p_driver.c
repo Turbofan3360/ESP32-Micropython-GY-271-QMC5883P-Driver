@@ -11,11 +11,24 @@ mp_obj_t mpy_init(mp_obj_fun_bc_t *self, size_t n_args, size_t n_kw, mp_obj_t *a
 }
 
 static mp_obj_t qmc5883p_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args){
+    nlr_buf_t cpu_state;
+    mp_obj_t test_method[2];
+
 	// Checking arguments
 	mp_arg_check_num(n_args, n_kw, 1, 1, false);
 
     // Creating and allocating memory to the "self" instance of this module
 	qmc5883p_obj_t *self = m_new_obj(qmc5883p_obj_t);
+
+    if (nlr_push(&cpu_state) == 0){
+        mp_load_method(args[0], MP_QSTR_writeto_mem, test_method);
+        mp_load_method(args[0], MP_QSTR_readfrom_mem, test_method);
+
+        nlr_pop();
+    }
+    else {
+        mp_raise_ValueError("I2C bus object not valid");
+    }
 
     self->address = 0x2C;
     self->i2c_bus = args[0];
@@ -32,6 +45,8 @@ static mp_obj_t qmc5883p_make_new(const mp_obj_type_t *type, size_t n_args, size
 }
 
 static void magnetometer_setup(qmc5883p_obj_t *self){
+    nlr_buf_t cpu_state;
+
 	// Loading writeto_mem method
     mp_obj_t writeto_method[2];
     mp_load_method(self->i2c_bus, MP_QSTR_writeto_mem, writeto_method);
@@ -41,33 +56,27 @@ static void magnetometer_setup(qmc5883p_obj_t *self){
     mp_obj_t control1_data[3] = {mp_obj_new_int(self->address), mp_obj_new_int(CONTROL_1_REG), mp_obj_new_bytes((const byte[]){0x1D}, 1)};
     mp_obj_t control2_data[3] = {mp_obj_new_int(self->address), mp_obj_new_int(CONTROL_2_REG), mp_obj_new_bytes((const byte[]){0x0C}, 1)};
 
-    // Writing values
-    mp_call_function_n_kw(writeto_method[0], 3, 0, control1_data);
-    mp_call_function_n_kw(writeto_method[0], 3, 0, control2_data);
+    if (nlr_push(&cpu_state) == 0){
+        // Writing values
+        mp_call_function_n_kw(writeto_method[0], 3, 0, control1_data);
+        mp_call_function_n_kw(writeto_method[0], 3, 0, control2_data);
+
+        nlr_pop();
+    }
+    else {
+        mp_raise_OSError(MP_ENODEV);
+    }
 }
 
 static uint8_t* bytearray_to_array(mp_obj_t bytearray){
-    int i;
-
-    // Utility to convert from a mp_obj_t bytearray to C array type
+    // Utility to get the pointer from a mp_obj_t bytearray so the data can be accessed
     mp_buffer_info_t buf_info;
 
     mp_get_buf_raise(bytearray, &buf_info, MP_BUFFER_READ);
 
     const uint8_t *data = (const uint8_t *)buf_info.buf;
-    size_t length = buf_info.len;
 
-    uint8_t *buffer = malloc(length);
-
-    if (buffer == NULL){
-        mp_raise_OSError(MP_ENOMEM);
-    }
-
-    for (i=0; i < length; i++){
-        buffer[i] = data[i];
-    }
-
-    return buffer;
+    return data;
 }
 
 static float* mp_array_to_c_array(mp_obj_t array){
@@ -75,6 +84,11 @@ static float* mp_array_to_c_array(mp_obj_t array){
     mp_obj_t *items;
     int i;
     float *buffer = malloc(4*sizeof(float));
+
+    if (buffer == NULL){
+        // Error: out of memory
+        mp_raise_OSError(MP_ENOMEM);
+    }
 
     mp_obj_get_array(array, &len, &items);
 
@@ -96,17 +110,29 @@ static float* normalize_vector(float *vector){
     sum_sq = vector[0]*vector[0] + vector[1]*vector[1] + vector[2]*vector[2];
     sum = sqrt(sum_sq);
 
-    vector_normalized[0] = vector[0] / sum;
-    vector_normalized[1] = vector[1] / sum;
-    vector_normalized[2] = vector[2] / sum;
+    // Guarding against 0-division error
+    if (sum < 1e-10f){
+        free(vector);
+        mp_raise_ValueError("Magnetometer reading too small (vector length < 1e-10 Gauss). Can't normalize vector.");
+    }
+    else{
+        vector_normalized[0] = vector[0] / sum;
+        vector_normalized[1] = vector[1] / sum;
+        vector_normalized[2] = vector[2] / sum;
+    }
 
     return vector_normalized;
 }
 
-static float quat_rotate_mag_readings(qmc5883p_obj_t *self, float *quaternion){
+static float* quat_rotate_mag_readings(qmc5883p_obj_t *self, float *quaternion){
     float qw, qx, qy, qz;
-    float world_magnetometer[2];
+    float *world_magnetometer = malloc(2*sizeof(float));
     float *normalized_mag;
+
+    if (world_magnetometer == NULL){
+        // Error: out of memory
+        mp_raise_OSError(ENOMEM);
+    }
 
     qw = quaternion[0];
     qx = quaternion[1];
@@ -119,14 +145,19 @@ static float quat_rotate_mag_readings(qmc5883p_obj_t *self, float *quaternion){
     world_magnetometer[0] = (qw*qw + qx*qx - qy*qy - qz*qz)*normalized_mag[0] + 2*(qx*qy - qw*qz)*normalized_mag[1] + 2*(qx*qz + qw*qy)*normalized_mag[2];
     world_magnetometer[1] = 2*(qx*qy + qw*qz)*normalized_mag[0] + (qw*qw - qx*qx + qy*qy - qz*qz)*normalized_mag[1] + 2*(qy*qz - qw*qx)*normalized_mag[2];
 
-    free(normalized_mag_readings)
+    free(normalized_mag);
 
     return world_magnetometer;
 }
 
-static float heading_vector(qmc5883p_obj_t *self, float *quaternion){
+static float* heading_vector(qmc5883p_obj_t *self, float *quaternion){
     float qw, qx, qy, qz;
-    float world_heading[2];
+    float *world_heading = malloc(2*sizeof(float));
+
+    if (world_heading == NULL){
+        // Error: out of memory
+        mp_raise_OSError(MP_ENOMEM);
+    }
 
     qw = quaternion[0];
     qx = quaternion[1];
@@ -144,25 +175,31 @@ static int check_drdy(qmc5883p_obj_t *self){
     mp_obj_t readfrom_method[2];
     mp_obj_t statusreg_data;
     uint8_t *statusreg_intdata;
-    uint8_t statusreg_int;
     int counter = 0;
+    nlr_buf_t cpu_state;
 
     mp_load_method(self->i2c_bus, MP_QSTR_readfrom_mem, readfrom_method);
     mp_obj_t arguments[3] = {mp_obj_new_int(self->address), mp_obj_new_int(STATUS_REG), mp_obj_new_int(1)};
 
     // Checking the DRDY bit of status register
-    while (counter <= 2){
+    while (counter < 2){
         // Making sure that the loop times out after two attempts
         counter ++;
 
         // Reading from the sensor, then checking the bit
-        statusreg_data = mp_call_function_n_kw(readfrom_method[0], 3, 0, arguments);
+
+        if (nlr_push(&cpu_state) == 0){
+            statusreg_data = mp_call_function_n_kw(readfrom_method[0], 3, 0, arguments);
+
+            nlr_pop();
+        }
+        else {
+            mp_raise_OSError(MP_ENODEV);
+        }
+
         statusreg_intdata = bytearray_to_array(statusreg_data);
-        statusreg_int = statusreg_intdata[0];
 
-        free(statusreg_intdata);
-
-        if (statusreg_int & 0x01){
+        if (statusreg_intdata[0] & 0x01){
             return 1;
         }
         else {
@@ -179,6 +216,7 @@ static int update_data(qmc5883p_obj_t *self){
     uint8_t *mag_intdata;
     float xdata, ydata, zdata;
     int flag;
+    nlr_buf_t cpu_state;
 
     mp_load_method(self->i2c_bus, MP_QSTR_readfrom_mem, readfrom_method);
 
@@ -190,7 +228,14 @@ static int update_data(qmc5883p_obj_t *self){
 
     // Burst reading the 6 data bytes from the sensor
     mp_obj_t data_arguments[3] = {mp_obj_new_int(self->address), mp_obj_new_int(XDATA_REG), mp_obj_new_int(6)};
-    mag_data = mp_call_function_n_kw(readfrom_method[0], 3, 0, data_arguments);
+
+    if (nlr_push(&cpu_state) == 0){
+        mag_data = mp_call_function_n_kw(readfrom_method[0], 3, 0, data_arguments);
+        nlr_pop();
+    }
+    else {
+        mp_raise_OSError(MP_ENODEV);
+    }
 
     mag_intdata = bytearray_to_array(mag_data);
 
@@ -206,8 +251,6 @@ static int update_data(qmc5883p_obj_t *self){
     self->data[0] = xdata;
     self->data[1] = ydata;
     self->data[2] = zdata;
-
-    free(mag_intdata);
 
     return 1;
 }
@@ -245,7 +288,7 @@ static mp_obj_t compass_2d(mp_obj_t self_in, mp_obj_t dec){
     heading %= 360;
 
     // Rounding heading to nearest degree
-    heading_rounded = uint16_t(heading+0.5f);
+    heading_rounded = (uint16_t)(heading+0.5f);
 
     return mp_obj_new_int_from_uint(heading_rounded);
 }
@@ -254,17 +297,37 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_2(qmc5883p_compass_2d_obj, compass_2d);
 static mp_obj_t compass_3d(mp_obj_t self_in, mp_obj_t quaternion, mp_obj_t dec){
     qmc5883p_obj_t *self = MP_OBJ_TO_PTR(self_in);
     float declination = mp_obj_get_float(dec);
-    float *quat, mag_directionvector[2], headingvector[2];
+    float *quat = NULL, *headingvector = NULL, *mag_directionvector = NULL;
     float dotproduct, crossproduct_z, heading;
     uint16_t heading_rounded;
     int flag;
+    nlr_buf_t cpu_state;
 
-    quat = mp_array_to_c_array(quaternion);
+    // Error handling 
+    // If any of these functions fail, the required memory will be tidied up and then the error code returned
+    if (nlr_push(&cpu_state) == 0){
+        quat = mp_array_to_c_array(quaternion);
 
-    flag = update_data(self);
+        flag = update_data(self);
 
-    mag_directionvector = quat_rotate_mag_readings(self, quat);
-    headingvector = heading_vector(self, quat);
+        mag_directionvector = quat_rotate_mag_readings(self, quat);
+        headingvector = heading_vector(self, quat);
+
+        nlr_pop();
+    }
+    else {
+        if (quat){
+            free(quat);
+        }
+        if (headingvector){
+            free(headingvector);
+        }
+        if (mag_directionvector){
+            free(mag_directionvector);
+        }
+
+        nlr_jump(cpu_state.ret_val);
+    }
 
     // Heading calc maths: cross product = |a|*|b|*sin(theta), dot product = |a|*|b|*cos(theta)
     // So atan(crossproduct/dotproduct)=atan(sin(theta)/cos(theta))=atan(tan(theta))=theta
@@ -276,19 +339,19 @@ static mp_obj_t compass_3d(mp_obj_t self_in, mp_obj_t quaternion, mp_obj_t dec){
 
     // Ensuring heading goes from 0->360 degrees
     heading %= 360;
-    heading_rounded = uint16_t(heading_rounded+0.5f);
+    heading_rounded = (uint16_t)(heading+0.5f);
 
     free(quat);
+    free(headingvector);
+    free(mag_directionvector);
 
-    return heading_rounded;
+    return mp_obj_new_int_from_uint(heading_rounded);
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_2(qmc5883p_compass_3d_obj, compass_3d);
+STATIC MP_DEFINE_CONST_FUN_OBJ_3(qmc5883p_compass_3d_obj, compass_3d);
 
 
-// TODO: ADD ERROR HANDLING
 // TODO: FIGURE OUT HOW TO DO LOGGING
 // TODO: ADD CALIBRATION FUNCTION
-
 
 
 
