@@ -1,4 +1,4 @@
-#include "gy271_qmc5833p_driver.h"
+#include "qmc5883p.h"
 
 mp_obj_t mpy_init(mp_obj_fun_bc_t *self, size_t n_args, size_t n_kw, mp_obj_t *args){
 	MP_DYNRUNTIME_INIT_ENTRY;
@@ -131,7 +131,7 @@ static float* quat_rotate_mag_readings(qmc5883p_obj_t *self, float *quaternion){
 
     if (world_magnetometer == NULL){
         // Error: out of memory
-        mp_raise_OSError(ENOMEM);
+        mp_raise_OSError(MP_ENOMEM);
     }
 
     qw = quaternion[0];
