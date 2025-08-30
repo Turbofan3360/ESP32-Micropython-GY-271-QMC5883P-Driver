@@ -1,7 +1,13 @@
+#ifndef QMC5883P_H
+#define QMC5883P_H
+
+#include <stdlib.h>
 #include <stdint.h>
 #include <math.h>
 
-#include "py/dynruntime.h"
+#include "py/runtime.h"
+#include "py/obj.h"
+#include "py/objstr.h"
 #include "py/mphal.h"
 #include "py/nlr.h"
 
@@ -17,7 +23,7 @@
 
 // Constant definitions
 #define M_PI 3.14159265358979323846
-#define RAD_TO_DEG (180/M_PI)
+#define RAD_TO_DEG (180.0/M_PI)
 
 // Function declarations
 static void magnetometer_setup(qmc5883p_obj_t *self);
@@ -38,3 +44,7 @@ typedef struct _qmc5883p_obj_t {
 	float softcal[3];
 	float hardcal[3];
 } qmc5883p_obj_t;
+
+extern const mp_obj_type_t qmc5883p_type;
+
+#endif
