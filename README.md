@@ -58,11 +58,11 @@ To do this, you will need:
  - ESP-IDF cloned from github
  - Micropython cloned from github
 
-1 - Enter your esp-idf directory, and run ./install.sh (only needs to be run the first time)
-2 - Enter your esp-idf directory and run . ./export.sh (needs to be run every new terminal session)
-3 - Download the files from embedded_c_module and place them in a directory of your choosing
-4 - Enter your directory ~/micropython/ports/esp32 (can be replaced with whichever micropython board you are using)
-5 - Run the make command, specifying USER_C_MODULES=/path/to/QMC5883P_magnetometer/embedded_c_module (replace with your file path)
+1. Enter your esp-idf directory, and run ./install.sh (only needs to be run the first time)
+2. Enter your esp-idf directory and run . ./export.sh (needs to be run every new terminal session)
+3. Download the files from embedded_c_module and place them in a directory of your choosing
+4. Enter your directory ~/micropython/ports/esp32 (can be replaced with whichever micropython board you are using)
+5. Run the make command, specifying USER_C_MODULES=/path/to/QMC5883P_magnetometer/embedded_c_module (replace with your file path)
 
 For me, with an ESP32-S3 that has octal SPIRAM, the full make command is: 
 ```make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES=/path/to/QMC5883P_magnetometer/embedded_c_module```
