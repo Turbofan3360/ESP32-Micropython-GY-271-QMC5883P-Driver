@@ -12,7 +12,9 @@ You can also get raw magnetometer data out if you want to do outher things with 
 
 Calibration is done by calling the calibrate() method. The algorithm here compensates for both hard and soft iron effects - see the references for a detailed guide to magnetometer calibration. This code gets you to rotate the sensor - you need to rotate it 360 degrees around one axis (x, y or z) and then 360 degrees around a different axis, to complete a calibration rotation. The code provides a user output to let you know what it's up to. The code may complete calibration before you've done the full 360 degree rotation - this is not an issue. Calibration does not have to be completed to use the sensor, but is suggested - particularly for compass applications.
 
-### Example Usage: ###
+In the directory embedded_c_module, you will find the .c, .h, and .cmake files required to compile this QMC58833P driver into your micropython firmware. This currently has limited functionality, but I am currently developing it to include more functionality. Currently, no calibraiton method is implemented, and you have to provide a declination value to the compass_2d and compass_3d functions - even if it is 0.0. For usage of this module, see below.
+
+### Python Example Usage: ###
 
 ```python3
 gy271 = Magnetometer(42, 24)
@@ -27,6 +29,28 @@ heading_3d = gy271.compass_3d(q, declination=1.5)
 ```
 
 The two parameters that must be given to initialse the driver are the magnetometer's SCL and SDA pin numbers, in that order.
+
+### Embedded C Module Example Usage: ###
+
+```python3
+from machine import SoftI2C, Pin
+import qmc5883p
+
+scl_pin = 1
+sda_pin = 2
+declination = 5
+quaternion = [1, 0, 0, 0]
+
+bus = SoftI2C(scl=Pin(scl_pin), sda=Pin(sda_pin), freq=400000)
+
+magnetometer = qmc5883p.QMC5883P(bus)
+
+raw = magnetometer.getdata_raw()
+heading = magnetometer.compass_2d(declination)
+heading = magnetometer.compass_3d(quaternion, declination)
+```
+
+An I2C bus object is required to initialise the embedded C module. Declination is a required parameter.
 
 ### Module Configuration Settings: ###
 
