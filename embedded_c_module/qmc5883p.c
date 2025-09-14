@@ -350,6 +350,25 @@ mp_obj_t compass_3d(mp_obj_t self_in, mp_obj_t quaternion, mp_obj_t dec){
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(qmc5883p_compass_3d_obj, compass_3d);
 
+static mp_obj_t calibrate(mp_obj_t self_in, uint8_t calibrationrotations){
+    qmc5883p_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    float fieldstrength_gauss;
+    int i;
+
+    for (i = 0; i < 20; i++){
+        flag = update_data(self);
+        
+        // Summing up the field strengths
+        fieldstrength_gauss += sqrt(self->data[0]*self->data[0] + self->data[1]*self->data[1] + self->data[2]*self->data[2]);
+
+        mp_hal_delay_ms(5);
+    }
+
+    // Calculating the average field strength
+    fieldstrength_gauss /= 20;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(qmc5883p_calibrate_obj, calibrate);
+
 
 // TODO: FIGURE OUT HOW TO DO LOGGING
 // TODO: ADD CALIBRATION FUNCTION
