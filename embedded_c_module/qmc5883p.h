@@ -25,17 +25,7 @@
 #define M_PI 3.14159265358979323846
 #define RAD_TO_DEG (180.0/M_PI)
 
-// Function declarations
-static void magnetometer_setup(qmc5883p_obj_t *self);
-static uint8_t* bytearray_to_array(mp_obj_t bytearray);
-static float* mp_array_to_c_array(mp_obj_t array);
-static float* normalize_vector(float *vector);
-static float* quat_rotate_mag_readings(qmc5883p_obj_t *self, float *quaternion);
-static float* heading_vector(qmc5883p_obj_t *self, float *quaternion);
-static int check_drdy(qmc5883p_obj_t *self);
-static int update_data(qmc5883p_obj_t *self);
-
-
+// Object definition
 typedef struct _qmc5883p_obj_t {
 	mp_obj_base_t base;
 	mp_obj_t i2c_bus;
@@ -44,6 +34,16 @@ typedef struct _qmc5883p_obj_t {
 	float softcal[3];
 	float hardcal[3];
 } qmc5883p_obj_t;
+
+// Function declarations
+static void magnetometer_setup(qmc5883p_obj_t *self);
+static const uint8_t* bytearray_to_array(mp_obj_t bytearray);
+static float* mp_array_to_c_array(mp_obj_t array);
+static float* normalize_vector(float *vector);
+static float* quat_rotate_mag_readings(qmc5883p_obj_t *self, float *quaternion);
+static float* heading_vector(qmc5883p_obj_t *self, float *quaternion);
+static int check_drdy(qmc5883p_obj_t *self);
+static void update_data(qmc5883p_obj_t *self);
 
 extern const mp_obj_type_t qmc5883p_type;
 
