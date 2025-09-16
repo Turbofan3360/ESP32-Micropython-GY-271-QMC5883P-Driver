@@ -47,7 +47,7 @@ typedef struct {
 } calibration_data;
 
 // Function declarations
-static void log(char log_string);
+static void log_func(const char *log_string);
 static void magnetometer_setup(qmc5883p_obj_t *self);
 static void update_data(qmc5883p_obj_t *self);
 static float* mp_array_to_c_array(mp_obj_t array);

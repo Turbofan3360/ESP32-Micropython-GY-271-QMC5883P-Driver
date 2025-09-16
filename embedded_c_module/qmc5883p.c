@@ -62,7 +62,7 @@ static void magnetometer_setup(qmc5883p_obj_t *self){
     }
 }
 
-static void log(char log_string){
+static void log_func(const char *log_string){
     mp_printf(&mp_plat_print, log_string);
 }
 
@@ -274,8 +274,8 @@ static float list_values_range(float *list, uint8_t length){
 
 static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength){
     calibration_data *data = (calibration_data *) malloc(sizeof(calibration_data));
-    uint8_t xcomplete = ycomplete = zcomplete = 0;
-    uint16_t xcounter = ycounter = zcounter = 0;
+    uint8_t xcomplete = 0, ycomplete = 0, zcomplete = 0;
+    uint16_t xcounter = 0, ycounter = 0, zcounter = 0;
     float *xdata = NULL;
     float *ydata = NULL;
     float *zdata = NULL;
@@ -285,7 +285,7 @@ static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fi
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
     }
 
-    log((char *) "Begin compass rotation\n");
+    log_func("Begin compass rotation\n");
 
     // This loops for as long as all the axes don't have complete data
     while (!(xcomplete && ycomplete && zcomplete)){
@@ -309,7 +309,7 @@ static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fi
             // Termination conditions for each axis: determines whether each axis has had a complete rotation and returned to starting point
             if (list_values_range(xdata, xcounter) > 1.6*fieldstrength && fabs(xdata[xcounter-1] - xdata[0]) < 0.1){
                 xcomplete = 1;
-                log((char *) "X-axis complete\n");
+                log_func("X-axis complete\n");
             }
         }
 
@@ -329,7 +329,7 @@ static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fi
 
             if (list_values_range(ydata, ycounter) > 1.6*fieldstrength && fabs(ydata[ycounter-1] - ydata[0]) < 0.1){
                 ycomplete = 1;
-                log((char *) "Y-axis complete\n");
+                log_func("Y-axis complete\n");
             }
         }
 
@@ -349,7 +349,7 @@ static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fi
 
             if (list_values_range(zdata, zcounter) > 1.6*fieldstrength && fabs(zdata[zcounter-1] - zdata[0]) < 0.1){
                 zcomplete = 1;
-                log("Z-axis complete\n");
+                log_func("Z-axis complete\n");
             }
         }
 
@@ -384,10 +384,6 @@ static uint8_t is_in_array(float* array, uint16_t length, float item){
 static float* max_min_average_array(float* array, uint16_t length, uint8_t num_to_average){
     if (num_to_average > length){
         mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Incorrect parameters - can't find more values than are present in the array"));
-    }
-
-    if ((length > 65535) || (num_to_average > 255)){
-        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Array length or number of samples to average is too high"));
     }
 
     float *highest = malloc(num_to_average * FLOAT_SIZE);
@@ -556,7 +552,7 @@ mp_obj_t calibrate(mp_obj_t self_in){
     float *z_maxmin = NULL;
     uint8_t i;
 
-    log("Calibrating...\n");
+    log_func("Calibrating...\n");
 
     for (i = 0; i < 20; i++){
         update_data(self);
@@ -570,7 +566,7 @@ mp_obj_t calibrate(mp_obj_t self_in){
     // Calculating the average field strength
     fieldstrength_gauss /= 20;
 
-    log("Local magnetic field strength determined\n");
+    log_func("Local magnetic field strength determined\n");
 
     // Getting a complete axis of data from each magnetometer axis
     data = calibrationrotation_data(self, fieldstrength_gauss);
@@ -585,7 +581,7 @@ mp_obj_t calibrate(mp_obj_t self_in){
     self->hardcal[1] = (y_maxmin[0] + y_maxmin[1])/2;
     self->hardcal[2] = (z_maxmin[0] + z_maxmin[1])/2;
 
-    log("Hard iron calibration calculated\n");
+    log_func("Hard iron calibration calculated\n");
 
     // Calculating the soft offset calibration values
     xoffset = (x_maxmin[0] - x_maxmin[1])/2;
@@ -597,7 +593,7 @@ mp_obj_t calibrate(mp_obj_t self_in){
     self->softcal[1] = avg_offset/yoffset;
     self->softcal[2] = avg_offset/zoffset;
 
-    log("Soft iron calibration calculated\n");
+    log_func("Soft iron calibration calculated\n");
 
     free(x_maxmin);
     free(y_maxmin);
@@ -612,7 +608,6 @@ mp_obj_t calibrate(mp_obj_t self_in){
 static MP_DEFINE_CONST_FUN_OBJ_1(qmc5883p_calibrate_obj, calibrate);
 
 
-// TODO: FIGURE OUT HOW TO DO LOGGING
 
 
 
