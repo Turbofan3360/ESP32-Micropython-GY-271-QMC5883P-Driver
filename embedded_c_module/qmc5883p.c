@@ -21,6 +21,7 @@ mp_obj_t qmc5883p_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw
         mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("I2C bus object not valid"));
     }
 
+    // Initialising the required data in the "self" object
     self->base.type = &qmc5883p_type;
     self->address = 0x2C;
     self->i2c_bus = args[0];
@@ -61,6 +62,10 @@ static void magnetometer_setup(qmc5883p_obj_t *self){
     }
 }
 
+static void log(char log_string){
+    mp_printf(&mp_plat_print, log_string);
+}
+
 static const uint8_t* bytearray_to_array(mp_obj_t bytearray){
     // Utility to get the pointer from a mp_obj_t bytearray so the data can be accessed
     mp_buffer_info_t buf_info;
@@ -76,7 +81,7 @@ static float* mp_array_to_c_array(mp_obj_t array){
     size_t len;
     mp_obj_t *items;
     int i;
-    float *buffer = malloc(4*sizeof(float));
+    float *buffer = malloc(4*FLOAT_SIZE);
 
     if (buffer == NULL){
         // Error: out of memory
@@ -98,7 +103,7 @@ static float* mp_array_to_c_array(mp_obj_t array){
 
 static float* normalize_vector(float *vector){
     float sum_sq, sum;
-    float *vector_normalized = malloc(3*sizeof(float));
+    float *vector_normalized = malloc(3*FLOAT_SIZE);
 
     sum_sq = vector[0]*vector[0] + vector[1]*vector[1] + vector[2]*vector[2];
     sum = sqrt(sum_sq);
@@ -119,7 +124,7 @@ static float* normalize_vector(float *vector){
 
 static float* quat_rotate_mag_readings(qmc5883p_obj_t *self, float *quaternion){
     float qw, qx, qy, qz;
-    float *world_magnetometer = malloc(2*sizeof(float));
+    float *world_magnetometer = malloc(2*FLOAT_SIZE);
     float *normalized_mag;
 
     if (world_magnetometer == NULL){
@@ -145,7 +150,7 @@ static float* quat_rotate_mag_readings(qmc5883p_obj_t *self, float *quaternion){
 
 static float* heading_vector(qmc5883p_obj_t *self, float *quaternion){
     float qw, qx, qy, qz;
-    float *world_heading = malloc(2*sizeof(float));
+    float *world_heading = malloc(2*FLOAT_SIZE);
 
     if (world_heading == NULL){
         // Error: out of memory
@@ -164,7 +169,7 @@ static float* heading_vector(qmc5883p_obj_t *self, float *quaternion){
     return world_heading;
 }
 
-static int check_drdy(qmc5883p_obj_t *self){
+static uint8_t check_drdy(qmc5883p_obj_t *self){
     mp_obj_t readfrom_method[2];
     mp_obj_t statusreg_data;
     const uint8_t *statusreg_intdata;
@@ -246,6 +251,196 @@ static void update_data(qmc5883p_obj_t *self){
     self->data[2] = zdata;
 
     return;
+}
+
+static float list_values_range(float *list, uint8_t length){
+    int i;
+    float max = -INFINITY;
+    float min = INFINITY;
+
+    // Iterating through the array to look for the maximum and minimum values
+    for (i = 0; i < length; i++){
+        if (list[i] > max){
+            max = list[i];
+        }
+
+        if (list[i] < min){
+            min = list[i];
+        }
+    }
+
+    return max - min;
+}
+
+static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength){
+    calibration_data *data = (calibration_data *) malloc(sizeof(calibration_data));
+    uint8_t xcomplete = ycomplete = zcomplete = 0;
+    uint16_t xcounter = ycounter = zcounter = 0;
+    float *xdata = NULL;
+    float *ydata = NULL;
+    float *zdata = NULL;
+
+    if (data == NULL){
+        // Error: out of memory
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+    }
+
+    log((char *) "Begin compass rotation\n");
+
+    // This loops for as long as all the axes don't have complete data
+    while (!(xcomplete && ycomplete && zcomplete)){
+        update_data(self);
+
+        // If each axis has incomplete data, it reallocates memory to the data arrays and adds the data points to the new arrays
+        if (!xcomplete){
+            xcounter ++;
+            xdata = (float *)realloc(xdata, xcounter*FLOAT_SIZE);
+
+            if (xdata == NULL){
+                // Error: out of memory
+                free(ydata);
+                free(zdata);
+                free(data);
+                mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+            }
+
+            xdata[xcounter-1] = self->data[0];
+
+            // Termination conditions for each axis: determines whether each axis has had a complete rotation and returned to starting point
+            if (list_values_range(xdata, xcounter) > 1.6*fieldstrength && fabs(xdata[xcounter-1] - xdata[0]) < 0.1){
+                xcomplete = 1;
+                log((char *) "X-axis complete\n");
+            }
+        }
+
+        if (!ycomplete){
+            ycounter ++;
+            ydata = (float *)realloc(ydata, ycounter*FLOAT_SIZE);
+
+            if (ydata == NULL){
+                // Error: out of memory
+                free(xdata);
+                free(zdata);
+                free(data);
+                mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+            }
+
+            ydata[ycounter-1] = self->data[1];
+
+            if (list_values_range(ydata, ycounter) > 1.6*fieldstrength && fabs(ydata[ycounter-1] - ydata[0]) < 0.1){
+                ycomplete = 1;
+                log((char *) "Y-axis complete\n");
+            }
+        }
+
+        if (!zcomplete){
+            zcounter ++;
+            zdata = (float *)realloc(zdata, zcounter*FLOAT_SIZE);
+
+            if (zdata == NULL){
+                // Error: out of memory
+                free(xdata);
+                free(ydata);
+                free(data);
+                mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+            }
+
+            zdata[zcounter-1] = self->data[2];
+
+            if (list_values_range(zdata, zcounter) > 1.6*fieldstrength && fabs(zdata[zcounter-1] - zdata[0]) < 0.1){
+                zcomplete = 1;
+                log("Z-axis complete\n");
+            }
+        }
+
+        mp_hal_delay_ms(10);
+    }
+
+    // Putting all the collected data into the struct, which is then returned
+    data->xdata = xdata;
+    data->ydata = ydata;
+    data->zdata = zdata;
+
+    data->xlength = xcounter;
+    data->ylength = ycounter;
+    data->zlength = zcounter;
+
+    return data;
+}
+
+static uint8_t is_in_array(float* array, uint16_t length, float item){
+    uint8_t i;
+
+    // Utility to check if an item appears in an array
+    for (i = 0; i < length; i++){
+        if (array[i] == item){
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static float* max_min_average_array(float* array, uint16_t length, uint8_t num_to_average){
+    if (num_to_average > length){
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Incorrect parameters - can't find more values than are present in the array"));
+    }
+
+    if ((length > 65535) || (num_to_average > 255)){
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Array length or number of samples to average is too high"));
+    }
+
+    float *highest = malloc(num_to_average * FLOAT_SIZE);
+    float *lowest = malloc(num_to_average * FLOAT_SIZE);
+    float *averages = malloc(2*FLOAT_SIZE);
+    uint16_t i;
+    uint8_t j;
+
+    if ((averages == NULL) || (highest == NULL) || (lowest == NULL)){
+        // Error: out of memory
+        free(averages);
+        free(highest);
+        free(lowest);
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+    }
+
+    averages[0] = 0.0f;
+    averages[1] = 0.0f;
+
+    // Looking for the 5 highest and lowest values in the given array
+    for (j = 0; j < num_to_average; j++){
+        float l = INFINITY;
+        float h = -INFINITY;
+
+        // Finds the highest/lowest values in an array (whilst making sure the values aren't already in the list of the 5 highest/lowest values)
+        for (i = 0; i < length; i++){
+            if ((array[i] > h) && (is_in_array(highest, j, array[i]) == 0)){
+                h = array[i];
+            }
+
+            if ((array[i] < l) && (is_in_array(lowest, j, array[i]) == 0)){
+                l = array[i];
+            }
+        }
+
+        highest[j] = h;
+        lowest[j] = l;
+
+    }
+
+    // Sums the arrays and figures out the average highest/lowest value
+    for (i = 0; i < num_to_average; i++){
+        averages[0] += highest[i];
+        averages[1] += lowest[i];
+    }
+
+    averages[0] /= num_to_average;
+    averages[1] /= num_to_average;
+
+    free(highest);
+    free(lowest);
+
+    return averages;
 }
 
 mp_obj_t getdata_raw(mp_obj_t self_in){
@@ -350,13 +545,21 @@ mp_obj_t compass_3d(mp_obj_t self_in, mp_obj_t quaternion, mp_obj_t dec){
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(qmc5883p_compass_3d_obj, compass_3d);
 
-static mp_obj_t calibrate(mp_obj_t self_in, uint8_t calibrationrotations){
+mp_obj_t calibrate(mp_obj_t self_in){
     qmc5883p_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    float fieldstrength_gauss;
-    int i;
+
+    calibration_data* data = NULL;
+    float fieldstrength_gauss = 0.0f;
+    float xoffset, yoffset, zoffset, avg_offset;
+    float *x_maxmin = NULL;
+    float *y_maxmin = NULL;
+    float *z_maxmin = NULL;
+    uint8_t i;
+
+    log("Calibrating...\n");
 
     for (i = 0; i < 20; i++){
-        flag = update_data(self);
+        update_data(self);
         
         // Summing up the field strengths
         fieldstrength_gauss += sqrt(self->data[0]*self->data[0] + self->data[1]*self->data[1] + self->data[2]*self->data[2]);
@@ -366,12 +569,50 @@ static mp_obj_t calibrate(mp_obj_t self_in, uint8_t calibrationrotations){
 
     // Calculating the average field strength
     fieldstrength_gauss /= 20;
+
+    log("Local magnetic field strength determined\n");
+
+    // Getting a complete axis of data from each magnetometer axis
+    data = calibrationrotation_data(self, fieldstrength_gauss);
+
+    // Working out the average of the 5 highest/lowest values in each axis' data array
+    x_maxmin = max_min_average_array(data->xdata, data->xlength, 5);
+    y_maxmin = max_min_average_array(data->ydata, data->ylength, 5);
+    z_maxmin = max_min_average_array(data->zdata, data->zlength, 5);
+
+    // Calculating the hard offset calibration values
+    self->hardcal[0] = (x_maxmin[0] + x_maxmin[1])/2;
+    self->hardcal[1] = (y_maxmin[0] + y_maxmin[1])/2;
+    self->hardcal[2] = (z_maxmin[0] + z_maxmin[1])/2;
+
+    log("Hard iron calibration calculated\n");
+
+    // Calculating the soft offset calibration values
+    xoffset = (x_maxmin[0] - x_maxmin[1])/2;
+    yoffset = (y_maxmin[0] - y_maxmin[1])/2;
+    zoffset = (z_maxmin[0] - z_maxmin[1])/2;
+    avg_offset = (xoffset + yoffset + zoffset)/3;
+
+    self->softcal[0] = avg_offset/xoffset;
+    self->softcal[1] = avg_offset/yoffset;
+    self->softcal[2] = avg_offset/zoffset;
+
+    log("Soft iron calibration calculated\n");
+
+    free(x_maxmin);
+    free(y_maxmin);
+    free(z_maxmin);
+    free(data->xdata);
+    free(data->ydata);
+    free(data->zdata);
+    free(data);
+
+    return mp_obj_new_int_from_uint(1);
 }
-static MP_DEFINE_CONST_FUN_OBJ_2(qmc5883p_calibrate_obj, calibrate);
+static MP_DEFINE_CONST_FUN_OBJ_1(qmc5883p_calibrate_obj, calibrate);
 
 
 // TODO: FIGURE OUT HOW TO DO LOGGING
-// TODO: ADD CALIBRATION FUNCTION
 
 
 
@@ -380,6 +621,7 @@ static const mp_rom_map_elem_t qmc5883p_locals_dict_table[] = {
     {MP_ROM_QSTR(MP_QSTR_getdata_raw), MP_ROM_PTR(&qmc5883p_getdata_raw_obj)},
     {MP_ROM_QSTR(MP_QSTR_compass_2d), MP_ROM_PTR(&qmc5883p_compass_2d_obj)},
     {MP_ROM_QSTR(MP_QSTR_compass_3d), MP_ROM_PTR(&qmc5883p_compass_3d_obj)},
+    {MP_ROM_QSTR(MP_QSTR_calibrate), MP_ROM_PTR(&qmc5883p_calibrate_obj)},
 };
 static MP_DEFINE_CONST_DICT(qmc5883p_locals_dict, qmc5883p_locals_dict_table);
 
