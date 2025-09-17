@@ -63,7 +63,7 @@ static void magnetometer_setup(qmc5883p_obj_t *self){
 }
 
 static void log_func(const char *log_string){
-    mp_printf(&mp_plat_print, log_string);
+    mp_printf(&mp_plat_print, "%s", log_string);
 }
 
 static const uint8_t* bytearray_to_array(mp_obj_t bytearray){
@@ -253,8 +253,8 @@ static void update_data(qmc5883p_obj_t *self){
     return;
 }
 
-static float list_values_range(float *list, uint8_t length){
-    int i;
+static float list_values_range(float *list, uint16_t length){
+    uint16_t i;
     float max = -INFINITY;
     float min = INFINITY;
 
@@ -292,7 +292,7 @@ static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fi
         update_data(self);
 
         // If each axis has incomplete data, it reallocates memory to the data arrays and adds the data points to the new arrays
-        if (!xcomplete){
+        if (xcomplete == 0){
             xcounter ++;
             xdata = (float *)realloc(xdata, xcounter*FLOAT_SIZE);
 
@@ -307,13 +307,13 @@ static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fi
             xdata[xcounter-1] = self->data[0];
 
             // Termination conditions for each axis: determines whether each axis has had a complete rotation and returned to starting point
-            if (list_values_range(xdata, xcounter) > 1.6*fieldstrength && fabs(xdata[xcounter-1] - xdata[0]) < 0.1){
+            if ((list_values_range(xdata, xcounter) > 1.5*fieldstrength) && (fabs(xdata[xcounter-1] - xdata[0]) < 0.1)){
                 xcomplete = 1;
                 log_func("X-axis complete\n");
             }
         }
 
-        if (!ycomplete){
+        if (ycomplete == 0){
             ycounter ++;
             ydata = (float *)realloc(ydata, ycounter*FLOAT_SIZE);
 
@@ -327,13 +327,13 @@ static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fi
 
             ydata[ycounter-1] = self->data[1];
 
-            if (list_values_range(ydata, ycounter) > 1.6*fieldstrength && fabs(ydata[ycounter-1] - ydata[0]) < 0.1){
+            if ((list_values_range(ydata, ycounter) > 1.5*fieldstrength) && (fabs(ydata[ycounter-1] - ydata[0]) < 0.1)){
                 ycomplete = 1;
                 log_func("Y-axis complete\n");
             }
         }
 
-        if (!zcomplete){
+        if (zcomplete == 0){
             zcounter ++;
             zdata = (float *)realloc(zdata, zcounter*FLOAT_SIZE);
 
@@ -347,7 +347,7 @@ static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fi
 
             zdata[zcounter-1] = self->data[2];
 
-            if (list_values_range(zdata, zcounter) > 1.6*fieldstrength && fabs(zdata[zcounter-1] - zdata[0]) < 0.1){
+            if ((list_values_range(zdata, zcounter) > 1.5*fieldstrength) && (fabs(zdata[zcounter-1] - zdata[0]) < 0.1)){
                 zcomplete = 1;
                 log_func("Z-axis complete\n");
             }
@@ -421,7 +421,6 @@ static float* max_min_average_array(float* array, uint16_t length, uint8_t num_t
 
         highest[j] = h;
         lowest[j] = l;
-
     }
 
     // Sums the arrays and figures out the average highest/lowest value
@@ -603,7 +602,7 @@ mp_obj_t calibrate(mp_obj_t self_in){
     free(data->zdata);
     free(data);
 
-    return mp_obj_new_int_from_uint(1);
+    return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(qmc5883p_calibrate_obj, calibrate);
 
