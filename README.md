@@ -12,7 +12,7 @@ You can also get raw magnetometer data out if you want to do outher things with 
 
 Calibration is done by calling the calibrate() method. The algorithm here compensates for both hard and soft iron effects - see the references for a detailed guide to magnetometer calibration. This code gets you to rotate the sensor - you need to rotate it 360 degrees around one axis (x, y or z) and then 360 degrees around a different axis, to complete a calibration rotation. The code provides a user output to let you know what it's up to. The code may complete calibration before you've done the full 360 degree rotation - this is not an issue. Calibration does not have to be completed to use the sensor, but is suggested - particularly for compass applications.
 
-In the directory embedded_c_module, you will find the .c, .h, and .cmake files required to compile this QMC58833P driver into your micropython firmware. This currently has limited functionality, but I am developing it to include more functionality. Currently, no calibraiton method is implemented, and you have to provide a declination value to the compass_2d and compass_3d functions - even if it is 0.0. For usage of this module, see below.
+In the directory embedded_c_module, you will find the .c, .h, and .cmake files required to compile this QMC58833P driver into your micropython firmware. This has the full functionality of the MicroPython driver, but with a few differences. To initialise the driver, you need to pass in a MicroPython I2C bus object (not scl/sda pin numbers), and both the compass_2d and compass_3d methods require the declination parameter. As well, the calibrate() method does not accept the calibrationrotations parameter (it defaults to 1; I thought that anything else seemed redundant). See below for details on how to compile this into your micropython board's firmware.
 
 ### Python Example Usage: ###
 
@@ -45,6 +45,7 @@ bus = SoftI2C(scl=Pin(scl_pin), sda=Pin(sda_pin), freq=400000)
 
 magnetometer = qmc5883p.QMC5883P(bus)
 
+magnetometer.calibrate()
 raw = magnetometer.getdata_raw()
 heading = magnetometer.compass_2d(declination)
 heading = magnetometer.compass_3d(quaternion, declination)
@@ -64,8 +65,10 @@ To do this, you will need:
 4. Enter your directory ~/micropython/ports/esp32 (can be replaced with whichever micropython board you are using)
 5. Run the make command, specifying USER_C_MODULES=/path/to/QMC5883P_magnetometer/embedded_c_module (replace with your file path)
 
-For me, with an ESP32-S3 that has octal SPIRAM, the full make command is: 
-```make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES=/path/to/QMC5883P_magnetometer/embedded_c_module```
+For me, with an ESP32-S3 that has octal SPIRAM, the full make command is:
+```
+make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES=/path/to/QMC5883P_magnetometer/embedded_c_module
+```
 
 ### Module Configuration Settings: ###
 

@@ -1,6 +1,10 @@
 #include "qmc5883p.h"
 
 mp_obj_t qmc5883p_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args){
+    /**
+     * This function initialises a new driver instance. It checks the I2C bus object is valid, and then initialises the module object.
+     * It then calls magnetometer_setup to configure the QMC5883P's config registers as required.
+    */
     nlr_buf_t cpu_state;
     mp_obj_t test_method[2];
 
@@ -38,6 +42,9 @@ mp_obj_t qmc5883p_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw
 }
 
 static void magnetometer_setup(qmc5883p_obj_t *self){
+    /**
+     * This function configures the QMC5883P chip's registers to the required settings (described below)
+    */
     nlr_buf_t cpu_state;
 
 	// Loading writeto_mem method
@@ -63,11 +70,17 @@ static void magnetometer_setup(qmc5883p_obj_t *self){
 }
 
 static void log_func(const char *log_string){
+    /**
+     * Basic logging function - currently just prints to the REPL, but can be adapted to log to other places (e.g. log to a file) if needed
+    */
     mp_printf(&mp_plat_print, "%s", log_string);
 }
 
-static const uint8_t* bytearray_to_array(mp_obj_t bytearray){
-    // Utility to get the pointer from a mp_obj_t bytearray so the data can be accessed
+static const uint8_t* mparray_to_int(mp_obj_t bytearray){
+    /**
+     * Converts from a micropython bytearray to array of C ints
+     * I.e. converts from python bytearray to a C array type
+    */
     mp_buffer_info_t buf_info;
 
     mp_get_buffer_raise(bytearray, &buf_info, MP_BUFFER_READ);
@@ -77,7 +90,11 @@ static const uint8_t* bytearray_to_array(mp_obj_t bytearray){
     return data;
 }
 
-static float* mp_array_to_c_array(mp_obj_t array){
+static float* mparray_to_float(mp_obj_t array){
+    /**
+     * Converts from micropython array to an array of C floats
+     * Only gets 4 items as this is used to convert the quaternion orientation [qw, qx, qy, qz] into C floats
+    */
     size_t len;
     mp_obj_t *items;
     int i;
@@ -102,6 +119,9 @@ static float* mp_array_to_c_array(mp_obj_t array){
 }
 
 static float* normalize_vector(float *vector){
+    /**
+     * Normalizes a 3D vector
+    */
     float sum_sq, sum;
     float *vector_normalized = malloc(3*FLOAT_SIZE);
 
@@ -123,6 +143,10 @@ static float* normalize_vector(float *vector){
 }
 
 static float* quat_rotate_mag_readings(qmc5883p_obj_t *self, float *quaternion){
+    /**
+     * Rotates the magnetometer vector into the world reference frame
+     * Only returns x/y values as the z value should (theoretically) be 0 - and it isn't needed anyway
+    */
     float qw, qx, qy, qz;
     float *world_magnetometer = malloc(2*FLOAT_SIZE);
     float *normalized_mag;
@@ -149,6 +173,10 @@ static float* quat_rotate_mag_readings(qmc5883p_obj_t *self, float *quaternion){
 }
 
 static float* heading_vector(qmc5883p_obj_t *self, float *quaternion){
+    /**
+     * Finds the x/y heading vector for the module
+     * I.e. In the world reference frame (or the reference frame of your IMU, if that's where your quaternion is coming from), where is the module physically pointing?
+    */
     float qw, qx, qy, qz;
     float *world_heading = malloc(2*FLOAT_SIZE);
 
@@ -170,6 +198,10 @@ static float* heading_vector(qmc5883p_obj_t *self, float *quaternion){
 }
 
 static uint8_t check_drdy(qmc5883p_obj_t *self){
+    /**
+     * Checks the QMC5883P's status register to see if the data ready (drdy) bit is set
+     * If the drdy bit = 1, there's new sensor data available
+    */
     mp_obj_t readfrom_method[2];
     mp_obj_t statusreg_data;
     const uint8_t *statusreg_intdata;
@@ -195,7 +227,7 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
             mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENODEV - Could not communicate with module."));
         }
 
-        statusreg_intdata = bytearray_to_array(statusreg_data);
+        statusreg_intdata = mparray_to_int(statusreg_data);
 
         if (statusreg_intdata[0] & 0x01){
             return 1;
@@ -209,6 +241,9 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
 }
 
 static void update_data(qmc5883p_obj_t *self){
+    /**
+     * Updates the raw magnetometer data from the QMC5883P chip
+    */
     mp_obj_t mag_data;
     mp_obj_t readfrom_method[2];
     const uint8_t *mag_intdata;
@@ -235,7 +270,7 @@ static void update_data(qmc5883p_obj_t *self){
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENODEV - Could not communicate with module."));
     }
 
-    mag_intdata = bytearray_to_array(mag_data);
+    mag_intdata = mparray_to_int(mag_data);
 
     // Decoding the data into floats
     xdata = (int16_t)((mag_intdata[1] << 8) | mag_intdata[0]) / 15000.0f;
@@ -254,6 +289,9 @@ static void update_data(qmc5883p_obj_t *self){
 }
 
 static float list_values_range(float *list, uint16_t length){
+    /**
+     * Calculates the range between the highest and lowest values in an array
+    */
     uint16_t i;
     float max = -INFINITY;
     float min = INFINITY;
@@ -273,6 +311,10 @@ static float list_values_range(float *list, uint16_t length){
 }
 
 static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength){
+    /**
+     * Collects a complete data set for all angles around each magnetometer axis
+     * This data can then be used to calibrate the magnetometer
+    */
     calibration_data *data = (calibration_data *) malloc(sizeof(calibration_data));
     uint8_t xcomplete = 0, ycomplete = 0, zcomplete = 0;
     uint16_t xcounter = 0, ycounter = 0, zcounter = 0;
@@ -369,6 +411,9 @@ static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fi
 }
 
 static uint8_t is_in_array(float* array, uint16_t length, float item){
+    /**
+     * Utility to confirm whether or not a given item is present in an array
+    */
     uint8_t i;
 
     // Utility to check if an item appears in an array
@@ -382,6 +427,10 @@ static uint8_t is_in_array(float* array, uint16_t length, float item){
 }
 
 static float* max_min_average_array(float* array, uint16_t length, uint8_t num_to_average){
+    /**
+     * Finds the num_to_average highest and lowest values in an array
+     * The code then averages these highest/lowest values, and returns the average highest/lowest
+    */
     if (num_to_average > length){
         mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Incorrect parameters - can't find more values than are present in the array"));
     }
@@ -439,6 +488,10 @@ static float* max_min_average_array(float* array, uint16_t length, uint8_t num_t
 }
 
 mp_obj_t getdata_raw(mp_obj_t self_in){
+    /**
+     * Function to be called from python
+     * Returns a python array of the raw [x, y, z] magnetometer data (in Gauss)
+    */
     mp_obj_t data_array[3];
 
     qmc5883p_obj_t *self = MP_OBJ_TO_PTR(self_in);
@@ -455,6 +508,11 @@ mp_obj_t getdata_raw(mp_obj_t self_in){
 static MP_DEFINE_CONST_FUN_OBJ_1(qmc5883p_getdata_raw_obj, getdata_raw);
 
 mp_obj_t compass_2d(mp_obj_t self_in, mp_obj_t dec){
+    /**
+     * Basic compass function
+     * Calculates heading based on a basic atan2() of the x/y magnetometer data - no tilt compensation
+     * Requires you to pass in a declination value
+    */
     qmc5883p_obj_t *self = MP_OBJ_TO_PTR(self_in);
     float declination = mp_obj_get_float(dec);
     float heading;
@@ -481,6 +539,11 @@ mp_obj_t compass_2d(mp_obj_t self_in, mp_obj_t dec){
 static MP_DEFINE_CONST_FUN_OBJ_2(qmc5883p_compass_2d_obj, compass_2d);
 
 mp_obj_t compass_3d(mp_obj_t self_in, mp_obj_t quaternion, mp_obj_t dec){
+    /**
+     * Advanced compass function
+     * Contains full pitch/roll compensation algorithm for the compass - so it doesn't matter how the module is oriented, you get the correct heading value
+     * Requires orientation input as a quaternion [qw, qx, qy, qz], and declination value input
+    */
     qmc5883p_obj_t *self = MP_OBJ_TO_PTR(self_in);
     float declination = mp_obj_get_float(dec);
     float *quat = NULL, *headingvector = NULL, *mag_directionvector = NULL;
@@ -491,7 +554,7 @@ mp_obj_t compass_3d(mp_obj_t self_in, mp_obj_t quaternion, mp_obj_t dec){
     // Error handling 
     // If any of these functions fail, the required memory will be tidied up and then the error code returned
     if (nlr_push(&cpu_state) == 0){
-        quat = mp_array_to_c_array(quaternion);
+        quat = mparray_to_float(quaternion);
 
         update_data(self);
 
@@ -541,6 +604,11 @@ mp_obj_t compass_3d(mp_obj_t self_in, mp_obj_t quaternion, mp_obj_t dec){
 static MP_DEFINE_CONST_FUN_OBJ_3(qmc5883p_compass_3d_obj, compass_3d);
 
 mp_obj_t calibrate(mp_obj_t self_in){
+    /**
+     * Magnetometer calibration function - calibrates for hard and soft iron effects
+     * The function prints an output (to REPL) to let you know where it is in calibration
+     * When you've called the calibration function, you then have to rotate the module 360 degrees around any two of the x, y, or z axes until the calibration completes
+    */
     qmc5883p_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
     calibration_data* data = NULL;
@@ -606,9 +674,9 @@ mp_obj_t calibrate(mp_obj_t self_in){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(qmc5883p_calibrate_obj, calibrate);
 
-
-
-
+/**
+ * Code here exposes the module functions above to micropython as an object
+*/
 
 // Defining the functions that are exposed to micropython
 static const mp_rom_map_elem_t qmc5883p_locals_dict_table[] = {
