@@ -132,7 +132,6 @@ class Magnetometer:
         self._log("Begin compass rotation")
         
         while not(xcomplete and ycomplete and zcomplete):
-            axes_complete = 0
             flag = self._update_data()
             
             if not xcomplete:
