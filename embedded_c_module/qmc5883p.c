@@ -90,7 +90,7 @@ static const uint8_t* mparray_to_int(mp_obj_t bytearray){
     return data;
 }
 
-static float* mparray_to_float(mp_obj_t array){
+static void mparray_to_float(mp_obj_t array, float*) output){
     /**
      * Converts from micropython array to an array of C floats
      * Only gets 4 items as this is used to convert the quaternion orientation [qw, qx, qy, qz] into C floats
@@ -98,12 +98,6 @@ static float* mparray_to_float(mp_obj_t array){
     size_t len;
     mp_obj_t *items;
     int i;
-    float *buffer = malloc(4*FLOAT_SIZE);
-
-    if (buffer == NULL){
-        // Error: out of memory
-        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
-    }
 
     mp_obj_get_array(array, &len, &items);
 
@@ -112,78 +106,56 @@ static float* mparray_to_float(mp_obj_t array){
     }
 
     for (i=0; i < 4; i++){
-        buffer[i] = mp_obj_get_float(items[i]);
+        output[i] = mp_obj_get_float(items[i]);
     }
-
-    return buffer;
 }
 
-static float* normalize_vector(float *vector){
+static void normalize_vector(float* vector, float* output){
     /**
      * Normalizes a 3D vector
     */
     float sum_sq, sum;
-    float *vector_normalized = malloc(3*FLOAT_SIZE);
 
     sum_sq = vector[0]*vector[0] + vector[1]*vector[1] + vector[2]*vector[2];
     sum = sqrt(sum_sq);
 
     // Guarding against 0-division error
     if (sum < 1e-10f){
-        free(vector_normalized);
         mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Magnetometer reading too small (vector length < 1e-10 Gauss). Can't normalize vector."));
     }
     else{
-        vector_normalized[0] = vector[0] / sum;
-        vector_normalized[1] = vector[1] / sum;
-        vector_normalized[2] = vector[2] / sum;
+        output[0] = vector[0] / sum;
+        output[1] = vector[1] / sum;
+        output[2] = vector[2] / sum;
     }
-
-    return vector_normalized;
 }
 
-static float* quat_rotate_mag_readings(qmc5883p_obj_t *self, float *quaternion){
+static void quat_rotate_mag_readings(qmc5883p_obj_t* self, float* quaternion, float* output){
     /**
      * Rotates the magnetometer vector into the world reference frame
      * Only returns x/y values as the z value should (theoretically) be 0 - and it isn't needed anyway
     */
     float qw, qx, qy, qz;
-    float *world_magnetometer = malloc(2*FLOAT_SIZE);
-    float *normalized_mag;
-
-    if (world_magnetometer == NULL){
-        // Error: out of memory
-        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
-    }
+    float normalized_mag[3];
 
     qw = quaternion[0];
     qx = quaternion[1];
     qy = quaternion[2];
     qz = quaternion[3];
 
-    normalized_mag = normalize_vector(self->data);
+    normalize_vector(self->data, normalized_mag);
 
     // Using quaternion rotation to find the magnetic north direction vector in the world reference frame
-    world_magnetometer[0] = (qw*qw + qx*qx - qy*qy - qz*qz)*normalized_mag[0] + 2*(qx*qy - qw*qz)*normalized_mag[1] + 2*(qx*qz + qw*qy)*normalized_mag[2];
-    world_magnetometer[1] = 2*(qx*qy + qw*qz)*normalized_mag[0] + (qw*qw - qx*qx + qy*qy - qz*qz)*normalized_mag[1] + 2*(qy*qz - qw*qx)*normalized_mag[2];
-
-    free(normalized_mag);
-
-    return world_magnetometer;
+    output[0] = (qw*qw + qx*qx - qy*qy - qz*qz)*normalized_mag[0] + 2*(qx*qy - qw*qz)*normalized_mag[1] + 2*(qx*qz + qw*qy)*normalized_mag[2];
+    output[1] = 2*(qx*qy + qw*qz)*normalized_mag[0] + (qw*qw - qx*qx + qy*qy - qz*qz)*normalized_mag[1] + 2*(qy*qz - qw*qx)*normalized_mag[2];
 }
 
-static float* heading_vector(qmc5883p_obj_t *self, float *quaternion){
+static void heading_vector(qmc5883p_obj_t* self, float* quaternion, float* output){
     /**
      * Finds the x/y heading vector for the module
      * I.e. In the world reference frame (or the reference frame of your IMU, if that's where your quaternion is coming from), where is the module physically pointing?
     */
     float qw, qx, qy, qz;
-    float *world_heading = malloc(2*FLOAT_SIZE);
-
-    if (world_heading == NULL){
-        // Error: out of memory
-        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
-    }
 
     qw = quaternion[0];
     qx = quaternion[1];
@@ -191,10 +163,8 @@ static float* heading_vector(qmc5883p_obj_t *self, float *quaternion){
     qz = quaternion[3];
 
     // Using quaternion rotation to find the magnetometer's heading vector in the world reference frame
-    world_heading[0] = (qw*qw + qx*qx - qy*qy - qz*qz)*-1.0f;
-    world_heading[1] = (qx*qy + qw*qz)*-2.0f;
-
-    return world_heading;
+    output[0] = (qw*qw + qx*qx - qy*qy - qz*qz)*-1.0f;
+    output[1] = (qx*qy + qw*qz)*-2.0f;
 }
 
 static uint8_t check_drdy(qmc5883p_obj_t *self){
@@ -426,7 +396,7 @@ static uint8_t is_in_array(float* array, uint16_t length, float item){
     return 0;
 }
 
-static float* max_min_average_array(float* array, uint16_t length, uint8_t num_to_average){
+static void max_min_average_array(float* array, uint16_t length, uint8_t num_to_average, float* output){
     /**
      * Finds the num_to_average highest and lowest values in an array
      * The code then averages these highest/lowest values, and returns the average highest/lowest
@@ -437,20 +407,18 @@ static float* max_min_average_array(float* array, uint16_t length, uint8_t num_t
 
     float *highest = malloc(num_to_average * FLOAT_SIZE);
     float *lowest = malloc(num_to_average * FLOAT_SIZE);
-    float *averages = malloc(2*FLOAT_SIZE);
     uint16_t i;
     uint8_t j;
 
-    if ((averages == NULL) || (highest == NULL) || (lowest == NULL)){
+    if ((highest == NULL) || (lowest == NULL)){
         // Error: out of memory
-        free(averages);
         free(highest);
         free(lowest);
         mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
     }
 
-    averages[0] = 0.0f;
-    averages[1] = 0.0f;
+    output[0] = 0.0f;
+    output[1] = 0.0f;
 
     // Looking for the 5 highest and lowest values in the given array
     for (j = 0; j < num_to_average; j++){
@@ -474,17 +442,15 @@ static float* max_min_average_array(float* array, uint16_t length, uint8_t num_t
 
     // Sums the arrays and figures out the average highest/lowest value
     for (i = 0; i < num_to_average; i++){
-        averages[0] += highest[i];
-        averages[1] += lowest[i];
+        output[0] += highest[i];
+        output[1] += lowest[i];
     }
 
-    averages[0] /= num_to_average;
-    averages[1] /= num_to_average;
+    output[0] /= num_to_average;
+    output[1] /= num_to_average;
 
     free(highest);
     free(lowest);
-
-    return averages;
 }
 
 mp_obj_t getdata_raw(mp_obj_t self_in){
@@ -546,34 +512,23 @@ mp_obj_t compass_3d(mp_obj_t self_in, mp_obj_t quaternion, mp_obj_t dec){
     */
     qmc5883p_obj_t *self = MP_OBJ_TO_PTR(self_in);
     float declination = mp_obj_get_float(dec);
-    float *quat = NULL, *headingvector = NULL, *mag_directionvector = NULL;
-    float dotproduct, crossproduct_z, heading;
+    float dotproduct, crossproduct_z, heading, headingvector[2], mag_directionvector[2], quat[4];
     uint16_t heading_rounded;
     nlr_buf_t cpu_state;
 
     // Error handling 
     // If any of these functions fail, the required memory will be tidied up and then the error code returned
     if (nlr_push(&cpu_state) == 0){
-        quat = mparray_to_float(quaternion);
+        mparray_to_float(quaternion, quat);
 
         update_data(self);
 
-        mag_directionvector = quat_rotate_mag_readings(self, quat);
-        headingvector = heading_vector(self, quat);
+        quat_rotate_mag_readings(self, quat, mag_directionvector);
+        heading_vector(self, quat, headingvector);
 
         nlr_pop();
     }
     else {
-        if (quat){
-            free(quat);
-        }
-        if (headingvector){
-            free(headingvector);
-        }
-        if (mag_directionvector){
-            free(mag_directionvector);
-        }
-
         nlr_jump(cpu_state.ret_val);
     }
 
@@ -595,10 +550,6 @@ mp_obj_t compass_3d(mp_obj_t self_in, mp_obj_t quaternion, mp_obj_t dec){
 
     heading_rounded = (uint16_t)(heading+0.5f);
 
-    free(quat);
-    free(headingvector);
-    free(mag_directionvector);
-
     return mp_obj_new_int_from_uint(heading_rounded);
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(qmc5883p_compass_3d_obj, compass_3d);
@@ -614,9 +565,7 @@ mp_obj_t calibrate(mp_obj_t self_in){
     calibration_data* data = NULL;
     float fieldstrength_gauss = 0.0f;
     float xoffset, yoffset, zoffset, avg_offset;
-    float *x_maxmin = NULL;
-    float *y_maxmin = NULL;
-    float *z_maxmin = NULL;
+    float x_maxmin[2], y_maxmin[2], z_maxmin[2];
     uint8_t i;
 
     log_func("Calibrating...\n");
@@ -639,9 +588,9 @@ mp_obj_t calibrate(mp_obj_t self_in){
     data = calibrationrotation_data(self, fieldstrength_gauss);
 
     // Working out the average of the 5 highest/lowest values in each axis' data array
-    x_maxmin = max_min_average_array(data->xdata, data->xlength, 5);
-    y_maxmin = max_min_average_array(data->ydata, data->ylength, 5);
-    z_maxmin = max_min_average_array(data->zdata, data->zlength, 5);
+    max_min_average_array(data->xdata, data->xlength, 5, x_maxmin);
+    max_min_average_array(data->ydata, data->ylength, 5, y_maxmin);
+    max_min_average_array(data->zdata, data->zlength, 5, z_maxmin);
 
     // Calculating the hard offset calibration values
     self->hardcal[0] = (x_maxmin[0] + x_maxmin[1])/2;
@@ -662,9 +611,6 @@ mp_obj_t calibrate(mp_obj_t self_in){
 
     log_func("Soft iron calibration calculated\n");
 
-    free(x_maxmin);
-    free(y_maxmin);
-    free(z_maxmin);
     free(data->xdata);
     free(data->ydata);
     free(data->zdata);
