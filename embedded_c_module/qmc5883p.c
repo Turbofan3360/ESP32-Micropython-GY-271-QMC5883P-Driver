@@ -90,7 +90,7 @@ static const uint8_t* mparray_to_int(mp_obj_t bytearray){
     return data;
 }
 
-static void mparray_to_float(mp_obj_t array, float*) output){
+static void mparray_to_float(mp_obj_t array, float* output){
     /**
      * Converts from micropython array to an array of C floats
      * Only gets 4 items as this is used to convert the quaternion orientation [qw, qx, qy, qz] into C floats
@@ -280,22 +280,16 @@ static float list_values_range(float *list, uint16_t length){
     return max - min;
 }
 
-static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength){
+static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, calibration_data*){
     /**
      * Collects a complete data set for all angles around each magnetometer axis
      * This data can then be used to calibrate the magnetometer
     */
-    calibration_data *data = (calibration_data *) malloc(sizeof(calibration_data));
     uint8_t xcomplete = 0, ycomplete = 0, zcomplete = 0;
     uint16_t xcounter = 0, ycounter = 0, zcounter = 0;
     float *xdata = NULL;
     float *ydata = NULL;
     float *zdata = NULL;
-
-    if (data == NULL){
-        // Error: out of memory
-        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
-    }
 
     log_func("Begin compass rotation\n");
 
@@ -312,7 +306,6 @@ static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fi
                 // Error: out of memory
                 free(ydata);
                 free(zdata);
-                free(data);
                 mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
             }
 
@@ -333,7 +326,6 @@ static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fi
                 // Error: out of memory
                 free(xdata);
                 free(zdata);
-                free(data);
                 mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
             }
 
@@ -353,7 +345,6 @@ static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fi
                 // Error: out of memory
                 free(xdata);
                 free(ydata);
-                free(data);
                 mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
             }
 
@@ -369,15 +360,13 @@ static calibration_data* calibrationrotation_data(qmc5883p_obj_t *self, float fi
     }
 
     // Putting all the collected data into the struct, which is then returned
-    data->xdata = xdata;
-    data->ydata = ydata;
-    data->zdata = zdata;
+    output->xdata = xdata;
+    output->ydata = ydata;
+    output->zdata = zdata;
 
-    data->xlength = xcounter;
-    data->ylength = ycounter;
-    data->zlength = zcounter;
-
-    return data;
+    output->xlength = xcounter;
+    output->ylength = ycounter;
+    output->zlength = zcounter;
 }
 
 static uint8_t is_in_array(float* array, uint16_t length, float item){
@@ -562,7 +551,7 @@ mp_obj_t calibrate(mp_obj_t self_in){
     */
     qmc5883p_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
-    calibration_data* data = NULL;
+    calibration_data data;
     float fieldstrength_gauss = 0.0f;
     float xoffset, yoffset, zoffset, avg_offset;
     float x_maxmin[2], y_maxmin[2], z_maxmin[2];
@@ -585,12 +574,12 @@ mp_obj_t calibrate(mp_obj_t self_in){
     log_func("Local magnetic field strength determined\n");
 
     // Getting a complete axis of data from each magnetometer axis
-    data = calibrationrotation_data(self, fieldstrength_gauss);
+    calibrationrotation_data(self, fieldstrength_gauss, &data);
 
     // Working out the average of the 5 highest/lowest values in each axis' data array
-    max_min_average_array(data->xdata, data->xlength, 5, x_maxmin);
-    max_min_average_array(data->ydata, data->ylength, 5, y_maxmin);
-    max_min_average_array(data->zdata, data->zlength, 5, z_maxmin);
+    max_min_average_array(data.xdata, data.xlength, 5, x_maxmin);
+    max_min_average_array(data.ydata, data.ylength, 5, y_maxmin);
+    max_min_average_array(data.zdata, data.zlength, 5, z_maxmin);
 
     // Calculating the hard offset calibration values
     self->hardcal[0] = (x_maxmin[0] + x_maxmin[1])/2;
@@ -611,10 +600,9 @@ mp_obj_t calibrate(mp_obj_t self_in){
 
     log_func("Soft iron calibration calculated\n");
 
-    free(data->xdata);
-    free(data->ydata);
-    free(data->zdata);
-    free(data);
+    free(data.xdata);
+    free(data.ydata);
+    free(data.zdata);
 
     return mp_const_none;
 }
