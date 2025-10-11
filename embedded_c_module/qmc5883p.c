@@ -280,7 +280,7 @@ static float list_values_range(float *list, uint16_t length){
     return max - min;
 }
 
-static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, calibration_data*){
+static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, calibration_data* output){
     /**
      * Collects a complete data set for all angles around each magnetometer axis
      * This data can then be used to calibrate the magnetometer
