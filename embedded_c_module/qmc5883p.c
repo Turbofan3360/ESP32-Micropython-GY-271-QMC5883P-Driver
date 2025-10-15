@@ -306,7 +306,7 @@ static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, 
                 // Error: out of memory
                 free(ydata);
                 free(zdata);
-                mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+                mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
             }
 
             xdata[xcounter-1] = self->data[0];
@@ -326,7 +326,7 @@ static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, 
                 // Error: out of memory
                 free(xdata);
                 free(zdata);
-                mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+                mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
             }
 
             ydata[ycounter-1] = self->data[1];
@@ -345,7 +345,7 @@ static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, 
                 // Error: out of memory
                 free(xdata);
                 free(ydata);
-                mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+                mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
             }
 
             zdata[zcounter-1] = self->data[2];
@@ -403,7 +403,7 @@ static void max_min_average_array(float* array, uint16_t length, uint8_t num_to_
         // Error: out of memory
         free(highest);
         free(lowest);
-        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+        mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
     }
 
     output[0] = 0.0f;
