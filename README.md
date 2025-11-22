@@ -12,7 +12,7 @@ You can also get raw magnetometer data out if you want to do outher things with 
 
 Calibration is done by calling the calibrate() method. The algorithm here compensates for both hard and soft iron effects - see the references for a detailed guide to magnetometer calibration. This code gets you to rotate the sensor - you need to rotate it 360 degrees around one axis (x, y or z) and then 360 degrees around a different axis, to complete a calibration rotation. The code provides a user output to let you know what it's up to. The code may complete calibration before you've done the full 360 degree rotation - this is not an issue. Calibration does not have to be completed to use the sensor, but is suggested - particularly for compass applications.
 
-In the directory embedded_c_module, you will find the .c, .h, and .cmake files required to compile this QMC58833P driver into your micropython firmware. This has the full functionality of the MicroPython driver, but with a few differences. To initialise the driver, you need to pass in a MicroPython I2C bus object (not SCL/SDA pin numbers), and both the compass_2d and compass_3d methods require the declination parameter. As well, the calibrate() method does not accept the calibrationrotations parameter (it defaults to 1; I thought that anything else seemed redundant). See below for details on how to compile this into your micropython board's firmware.
+In the directory embedded_c_module, you will find the .c, .h, and .cmake files required to compile this QMC58833P driver into your micropython firmware. This has the full functionality of the MicroPython driver. Both the compass_2d and compass_3d methods require the declination parameter, and the calibrate() method does not accept the calibrationrotations parameter (it defaults to 1; I thought that anything else seemed redundant). See below for details on how to compile this into your micropython board's firmware.
 
 ### Python Example Usage: ###
 
@@ -33,25 +33,23 @@ The two parameters that must be given to initialse the driver are the magnetomet
 ### Embedded C Module Example Usage: ###
 
 ```python3
-from machine import SoftI2C, Pin
 import qmc5883p
 
 scl_pin = 1
 sda_pin = 2
+# Port can be either 0 or 1, or -1 to automatically select. Default is -1
+port = 0
 declination = 5
 quaternion = [1, 0, 0, 0]
 
-bus = SoftI2C(scl=Pin(scl_pin), sda=Pin(sda_pin), freq=400000)
-
-magnetometer = qmc5883p.QMC5883P(bus)
+magnetometer = qmc5883p.QMC5883P(scl_pin, sda_pin, i2c_port=port)
 
 magnetometer.calibrate()
 raw = magnetometer.getdata_raw()
 heading = magnetometer.compass_2d(declination)
 heading = magnetometer.compass_3d(quaternion, declination)
 ```
-
-An I2C bus object is required to initialise the embedded C module. Declination is a required parameter.
+SCL/SDA pins are required, i2c_port is an optional parameter.
 
 ### Compiling the module into firmware: ###
 
