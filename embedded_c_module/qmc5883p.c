@@ -5,7 +5,7 @@ mp_obj_t qmc5883p_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw
      * This function initialises a new driver instance. It initialises the I2C bus and adds the magnetometer to it
      * It then calls magnetometer_setup to configure the QMC5883P's config registers as required.
     */
-    gpio_num_t scl_pin, sd_pin;
+    gpio_num_t scl_pin, sda_pin;
     int8_t port;
     i2c_port_num_t i2c_port;
     i2c_master_bus_handle_t bus_handle;
@@ -87,6 +87,9 @@ mp_obj_t qmc5883p_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw
     if (err != ESP_OK){
         mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Error adding device to I2C bus: %s"), esp_err_to_name(err));
     }
+
+    // Creating the "self" object for this driver
+    qmc5883p_obj_t* self = m_new_obj(qmc5883p_obj_t);
 
     // Initialising the required data in the "self" object
     self->base.type = &qmc5883p_type;
@@ -240,7 +243,6 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
      * Checks the QMC5883P's status register to see if the data ready (drdy) bit is set
      * If the drdy bit = 1, there's new sensor data available
     */
-    const uint8_t *statusreg_intdata;
     uint8_t attemps = 0, write_data[1], read_data[1];
     esp_err_t err;
 
@@ -253,7 +255,7 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
             mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Unable to read QMC5883P register: %s"), esp_err_to_name(err));
         }
 
-        if (read_data & 0x01){
+        if (read_data[0] & 0x01){
             return 1;
         }
 
@@ -262,7 +264,7 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
         attemps ++;
     }
 
-    return 0
+    return 0;
 }
 
 static void update_data(qmc5883p_obj_t *self){
@@ -601,7 +603,7 @@ mp_obj_t calibrate(mp_obj_t self_in){
         // Summing up the field strengths
         fieldstrength_gauss += sqrt(self->data[0]*self->data[0] + self->data[1]*self->data[1] + self->data[2]*self->data[2]);
 
-        wait_micro_s(5000)
+        wait_micro_s(5000);
     }
 
     // Calculating the average field strength

@@ -15,11 +15,9 @@
 #include "esp_timer.h"
 
 // Register address definitions
-#define CHIPID_REG 0x00
 #define XDATA_REG 0x01
 #define YDATA_REG 0x03
 #define ZDATA_REG 0x05
-#define AXIS_INVERT_REG 0x29
 #define STATUS_REG 0x09
 #define CONTROL_1_REG 0x0A
 #define CONTROL_2_REG 0x0B
