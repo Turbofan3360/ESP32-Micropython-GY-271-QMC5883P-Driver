@@ -243,12 +243,12 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
      * Checks the QMC5883P's status register to see if the data ready (drdy) bit is set
      * If the drdy bit = 1, there's new sensor data available
     */
-    uint8_t attemps = 0, write_data[1], read_data[1];
+    uint8_t attemtps = 0, write_data[1], read_data[1];
     esp_err_t err;
 
     write_data[0] = STATUS_REG;
 
-    while (attemps < 2){
+    while (attemtps < 2){
         err = i2c_master_transmit_receive(self->device_handle, write_data, 1, read_data, 1, 10);
 
         if (err != ESP_OK){
@@ -261,7 +261,7 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
 
         // 0.5ms delay
         wait_micro_s(500);
-        attemps ++;
+        attemtps ++;
     }
 
     return 0;
@@ -272,7 +272,7 @@ static void update_data(qmc5883p_obj_t *self){
      * Updates the raw magnetometer data from the QMC5883P chip
     */
     uint8_t write_data[1], read_data[6];
-    uint16_t xdata, ydata, zdata;
+    float xdata, ydata, zdata;
     esp_err_t err;
 
     write_data[0] = XDATA_REG;
