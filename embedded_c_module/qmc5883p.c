@@ -2,39 +2,107 @@
 
 mp_obj_t qmc5883p_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args){
     /**
-     * This function initialises a new driver instance. It checks the I2C bus object is valid, and then initialises the module object.
+     * This function initialises a new driver instance. It initialises the I2C bus and adds the magnetometer to it
      * It then calls magnetometer_setup to configure the QMC5883P's config registers as required.
     */
-    nlr_buf_t cpu_state;
-    mp_obj_t test_method[2];
+    gpio_num_t scl_pin, sda_pin;
+    int8_t port;
+    i2c_port_num_t i2c_port;
+    i2c_master_bus_handle_t bus_handle;
+    i2c_master_dev_handle_t device_handle;
+    esp_err_t err = ESP_ERR_INVALID_STATE;
 
-	// Checking arguments
-	mp_arg_check_num(n_args, n_kw, 1, 1, false);
+    // Defining the allowed arguments, and setting default values for I2C port/address. Can be modified as keyword arguments
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_scl, MP_ARG_REQUIRED | MP_ARG_INT },
+        { MP_QSTR_sda, MP_ARG_REQUIRED | MP_ARG_INT },
+        { MP_QSTR_i2c_port, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = DEFAULT_I2C_PORT_NUM} },
+    };
 
-    // Creating and allocating memory to the "self" instance of this module
-	qmc5883p_obj_t *self = m_new_obj(qmc5883p_obj_t);
+    // Checking arguments
+    mp_arg_val_t parsed_args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all_kw_array(n_args, n_kw, args, MP_ARRAY_SIZE(allowed_args), allowed_args, parsed_args);
 
-    if (nlr_push(&cpu_state) == 0){
-        // Testing to see if the required I2C methods can be loaded from the I2C object
-        mp_load_method(args[0], MP_QSTR_writeto_mem, test_method);
-        mp_load_method(args[0], MP_QSTR_readfrom_mem, test_method);
+    // Extracting arguments
+    scl_pin = parsed_args[0].u_int;
+    sda_pin = parsed_args[1].u_int;
+    port = parsed_args[2].u_int;
 
-        nlr_pop();
+    // Ensuring I2C port number and pin numbers are valid
+    if (!GPIO_IS_VALID_OUTPUT_GPIO(scl_pin) || !GPIO_IS_VALID_OUTPUT_GPIO(sda_pin)){
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid SCL or SDA pin number"));
     }
-    else {
-        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("I2C bus object not valid"));
+
+    if ((port < -1) || (port > 1)){
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid I2C port number"));
     }
+
+    // If port is not set to autoselect:
+    if (port != -1){
+        // Trying to pull handle for the bus (if it's already been initialized)
+        err = i2c_master_get_bus_handle(port, &bus_handle);
+    }
+
+    // If there's no already initialized bus handle or port is set to autoselect, then create a bus:
+    if (err == ESP_ERR_INVALID_STATE){
+        // Setting I2C port value
+        if (port == -1){
+            i2c_port = -1;
+        }
+        else if (port == 0){
+            i2c_port = I2C_NUM_0;
+        }
+        else if (port == 1){
+            i2c_port = I2C_NUM_1;
+        }
+
+        // Configuring ESP-IDF I2C bus object
+        i2c_master_bus_config_t i2c_mst_config = {
+            .clk_source = I2C_CLK_SRC_DEFAULT,
+            .i2c_port = i2c_port,
+            .scl_io_num = scl_pin,
+            .sda_io_num = sda_pin,
+            .glitch_ignore_cnt = 7,
+            .flags.enable_internal_pullup = true,
+        };
+
+        // Creating the bus
+        err = i2c_new_master_bus(&i2c_mst_config, &bus_handle);
+
+        if (err != ESP_OK){
+            mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Error initialising I2C bus: %s"), esp_err_to_name(err));
+        }
+    }
+
+    // Adding the QMC5883P slave device to the bus
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = QMC5883P_I2C_ADDRESS,
+        .scl_speed_hz = 400000,
+    };
+
+    // Installing this to the bus
+    err = i2c_master_bus_add_device(bus_handle, &dev_cfg, &device_handle);
+
+    if (err != ESP_OK){
+        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Error adding device to I2C bus: %s"), esp_err_to_name(err));
+    }
+
+    // Creating the "self" object for this driver
+    qmc5883p_obj_t* self = m_new_obj(qmc5883p_obj_t);
 
     // Initialising the required data in the "self" object
     self->base.type = &qmc5883p_type;
-    self->address = 0x2C;
-    self->i2c_bus = args[0];
+    self->bus_handle = bus_handle;
+    self->device_handle = device_handle;
+    self->i2c_address = QMC5883P_I2C_ADDRESS;
 
     self->data[0] = self->data[1] = self->data[2] = 0.0f;
     self->softcal[0] = self->softcal[1] = self->softcal[2] = 1.0f;
     self->hardcal[0] = self->hardcal[1] = self->hardcal[2] = 0.0f;
 
-    mp_hal_delay_ms(1);
+    // 1ms delay to ensure the chip powers up properly
+    wait_micro_s(1000);
 
     magnetometer_setup(self);
 
@@ -45,28 +113,45 @@ static void magnetometer_setup(qmc5883p_obj_t *self){
     /**
      * This function configures the QMC5883P chip's registers to the required settings (described below)
     */
-    nlr_buf_t cpu_state;
+    uint8_t write_data[2];
+    esp_err_t err;
 
-	// Loading writeto_mem method
-    mp_obj_t writeto_mem_method[2];
-    mp_load_method(self->i2c_bus, MP_QSTR_writeto_mem, writeto_mem_method);
+    // Probing to check there's actually a device there
+    err = i2c_master_probe(self->bus_handle, self->i2c_address, 100);
 
-    // Creating arguments arrays
-    // Module in normal power mode, 200Hz output rate, oversampling=4, downsampling=0
-    mp_obj_t control1_data[5] = {writeto_mem_method[0], writeto_mem_method[1], mp_obj_new_int(self->address), mp_obj_new_int(CONTROL_1_REG), mp_obj_new_bytes((const byte[]){0x1D}, 1)};
-    mp_obj_t control2_data[5] = {writeto_mem_method[0], writeto_mem_method[1], mp_obj_new_int(self->address), mp_obj_new_int(CONTROL_2_REG), mp_obj_new_bytes((const byte[]){0x0C}, 1)};
-
-    if (nlr_push(&cpu_state) == 0){
-        // Writing values
-        mp_call_method_n_kw(3, 0, control1_data);
-        mp_hal_delay_ms(5);
-        mp_call_method_n_kw(3, 0, control2_data);
-
-        nlr_pop();
+    if (err != ESP_OK){
+        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("QMC5883P device not found on I2C bus: %s"), esp_err_to_name(err));
     }
-    else {
-        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("Magnetometer setup failed - could not communicate with module."));
+
+    // Configuring module in normal power mode, 200Hz output rate, oversampling=4, downsampling=0
+    // Writing to first control register
+    write_data[0] = CONTROL_1_REG;
+    write_data[1] = 0x1D;
+    err = i2c_master_transmit(self->device_handle, write_data, 2, 100);
+
+    if (err != ESP_OK){
+        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Unable to write to sensor configuration registers: %s"), esp_err_to_name(err));
     }
+
+    // Writing to second control register
+    write_data[0] = CONTROL_2_REG;
+    write_data[1] = 0x0C;
+    err = i2c_master_transmit(self->device_handle, write_data, 2, 100);
+
+    if (err != ESP_OK){
+        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Unable to write to sensor configuration registers: %s"), esp_err_to_name(err));
+    }
+}
+
+static void wait_micro_s(uint32_t micro_s_delay){
+    /**
+     * Function to delay by a certain number of microseconds
+    */
+    uint64_t start = esp_timer_get_time();
+
+    while (esp_timer_get_time() - start < micro_s_delay){}
+
+    return;
 }
 
 static void log_func(const char *log_string){
@@ -74,20 +159,6 @@ static void log_func(const char *log_string){
      * Basic logging function - currently just prints to the REPL, but can be adapted to log to other places (e.g. log to a file) if needed
     */
     mp_printf(&mp_plat_print, "%s", log_string);
-}
-
-static const uint8_t* mparray_to_int(mp_obj_t bytearray){
-    /**
-     * Converts from a micropython bytearray to array of C ints
-     * I.e. converts from python bytearray to a C array type
-    */
-    mp_buffer_info_t buf_info;
-
-    mp_get_buffer_raise(bytearray, &buf_info, MP_BUFFER_READ);
-
-    const uint8_t *data = (const uint8_t *)buf_info.buf;
-
-    return data;
 }
 
 static void mparray_to_float(mp_obj_t array, float* output){
@@ -117,7 +188,7 @@ static void normalize_vector(float* vector, float* output){
     float sum_sq, sum;
 
     sum_sq = vector[0]*vector[0] + vector[1]*vector[1] + vector[2]*vector[2];
-    sum = sqrt(sum_sq);
+    sum = sqrtf(sum_sq);
 
     // Guarding against 0-division error
     if (sum < 1e-10f){
@@ -172,39 +243,25 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
      * Checks the QMC5883P's status register to see if the data ready (drdy) bit is set
      * If the drdy bit = 1, there's new sensor data available
     */
-    mp_obj_t readfrom_method[2];
-    mp_obj_t statusreg_data;
-    const uint8_t *statusreg_intdata;
-    int counter = 0;
-    nlr_buf_t cpu_state;
+    uint8_t attemtps = 0, write_data[1], read_data[1];
+    esp_err_t err;
 
-    mp_load_method(self->i2c_bus, MP_QSTR_readfrom_mem, readfrom_method);
-    mp_obj_t arguments[5] = {readfrom_method[0], readfrom_method[1], mp_obj_new_int(self->address), mp_obj_new_int(STATUS_REG), mp_obj_new_int(1)};
+    write_data[0] = STATUS_REG;
 
-    // Checking the DRDY bit of status register
-    while (counter < 2){
-        // Making sure that the loop times out after two attempts
-        counter ++;
+    while (attemtps < 2){
+        err = i2c_master_transmit_receive(self->device_handle, write_data, 1, read_data, 1, 10);
 
-        // Reading from the sensor, then checking the bit
-
-        if (nlr_push(&cpu_state) == 0){
-            statusreg_data = mp_call_method_n_kw(3, 0, arguments);
-
-            nlr_pop();
-        }
-        else {
-            mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENODEV - Could not communicate with module."));
+        if (err != ESP_OK){
+            mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Unable to read QMC5883P register: %s"), esp_err_to_name(err));
         }
 
-        statusreg_intdata = mparray_to_int(statusreg_data);
-
-        if (statusreg_intdata[0] & 0x01){
+        if (read_data[0] & 0x01){
             return 1;
         }
-        else {
-            mp_hal_delay_ms(5);
-        }
+
+        // 0.5ms delay
+        wait_micro_s(500);
+        attemtps ++;
     }
 
     return 0;
@@ -214,38 +271,28 @@ static void update_data(qmc5883p_obj_t *self){
     /**
      * Updates the raw magnetometer data from the QMC5883P chip
     */
-    mp_obj_t mag_data;
-    mp_obj_t readfrom_method[2];
-    const uint8_t *mag_intdata;
+    uint8_t write_data[1], read_data[6];
     float xdata, ydata, zdata;
-    int flag;
-    nlr_buf_t cpu_state;
+    esp_err_t err;
 
-    mp_load_method(self->i2c_bus, MP_QSTR_readfrom_mem, readfrom_method);
+    write_data[0] = XDATA_REG;
 
     // Checking if there's new data available
-    flag = check_drdy(self);
-    if (flag == 0){
+    if (check_drdy(self) == 0){
         return;
     }
 
-    // Burst reading the 6 data bytes from the sensor
-    mp_obj_t data_arguments[5] = {readfrom_method[0], readfrom_method[1], mp_obj_new_int(self->address), mp_obj_new_int(XDATA_REG), mp_obj_new_int(6)};
+    // Burst reading the 6 bytes from the sensor
+    err = i2c_master_transmit_receive(self->device_handle, write_data, 1, read_data, 6, 10);
 
-    if (nlr_push(&cpu_state) == 0){
-        mag_data = mp_call_method_n_kw(3, 0, data_arguments);
-        nlr_pop();
+    if (err != ESP_OK){
+        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Unable to read QMC5883P register: %s"), esp_err_to_name(err));
     }
-    else {
-        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENODEV - Could not communicate with module."));
-    }
-
-    mag_intdata = mparray_to_int(mag_data);
 
     // Decoding the data into floats
-    xdata = (int16_t)((mag_intdata[1] << 8) | mag_intdata[0]) / 15000.0f;
-    ydata = (int16_t)((mag_intdata[3] << 8) | mag_intdata[2]) / 15000.0f;
-    zdata = (int16_t)((mag_intdata[5] << 8) | mag_intdata[4]) / 15000.0f;
+    xdata = (int16_t)((read_data[1] << 8) | read_data[0]) / 15000.0f;
+    ydata = (int16_t)((read_data[3] << 8) | read_data[2]) / 15000.0f;
+    zdata = (int16_t)((read_data[5] << 8) | read_data[4]) / 15000.0f;
 
     xdata = (xdata - self->hardcal[0]) * self->softcal[0];
     ydata = (ydata - self->hardcal[1]) * self->softcal[1];
@@ -356,7 +403,7 @@ static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, 
             }
         }
 
-        mp_hal_delay_ms(10);
+        wait_micro_s(10000);
     }
 
     // Putting all the collected data into the struct, which is then returned
@@ -503,23 +550,13 @@ mp_obj_t compass_3d(mp_obj_t self_in, mp_obj_t quaternion, mp_obj_t dec){
     float declination = mp_obj_get_float(dec);
     float dotproduct, crossproduct_z, heading, headingvector[2], mag_directionvector[2], quat[4];
     uint16_t heading_rounded;
-    nlr_buf_t cpu_state;
 
-    // Error handling 
-    // If any of these functions fail, the required memory will be tidied up and then the error code returned
-    if (nlr_push(&cpu_state) == 0){
-        mparray_to_float(quaternion, quat);
+    mparray_to_float(quaternion, quat);
 
-        update_data(self);
+    update_data(self);
 
-        quat_rotate_mag_readings(self, quat, mag_directionvector);
-        heading_vector(self, quat, headingvector);
-
-        nlr_pop();
-    }
-    else {
-        nlr_jump(cpu_state.ret_val);
-    }
+    quat_rotate_mag_readings(self, quat, mag_directionvector);
+    heading_vector(self, quat, headingvector);
 
     // Heading calc maths: cross product = |a|*|b|*sin(theta), dot product = |a|*|b|*cos(theta)
     // So atan(crossproduct/dotproduct)=atan(sin(theta)/cos(theta))=atan(tan(theta))=theta
@@ -533,6 +570,7 @@ mp_obj_t compass_3d(mp_obj_t self_in, mp_obj_t quaternion, mp_obj_t dec){
     if (heading > 360.0f){
         heading -= 360.0f;
     }
+    
     else if (heading < 0.0f){
         heading += 360.0f;
     }
@@ -565,7 +603,7 @@ mp_obj_t calibrate(mp_obj_t self_in){
         // Summing up the field strengths
         fieldstrength_gauss += sqrt(self->data[0]*self->data[0] + self->data[1]*self->data[1] + self->data[2]*self->data[2]);
 
-        mp_hal_delay_ms(5);
+        wait_micro_s(5000);
     }
 
     // Calculating the average field strength
