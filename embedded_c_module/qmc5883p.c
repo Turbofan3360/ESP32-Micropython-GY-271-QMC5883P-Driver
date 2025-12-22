@@ -252,7 +252,7 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
         err = i2c_master_transmit_receive(self->device_handle, write_data, 1, read_data, 1, 10);
 
         if (err != ESP_OK){
-            mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Unable to read QMC5883P register: %s"), esp_err_to_name(err));
+            mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Unable to read QMC5883P status register: %s"), esp_err_to_name(err));
         }
 
         if (read_data[0] & 0x01){
@@ -286,7 +286,7 @@ static void update_data(qmc5883p_obj_t *self){
     err = i2c_master_transmit_receive(self->device_handle, write_data, 1, read_data, 6, 10);
 
     if (err != ESP_OK){
-        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Unable to read QMC5883P register: %s"), esp_err_to_name(err));
+        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Unable to read QMC5883P data register: %s"), esp_err_to_name(err));
     }
 
     // Decoding the data into floats
@@ -570,7 +570,7 @@ mp_obj_t compass_3d(mp_obj_t self_in, mp_obj_t quaternion, mp_obj_t dec){
     if (heading > 360.0f){
         heading -= 360.0f;
     }
-    
+
     else if (heading < 0.0f){
         heading += 360.0f;
     }
@@ -599,7 +599,7 @@ mp_obj_t calibrate(mp_obj_t self_in){
 
     for (i = 0; i < 20; i++){
         update_data(self);
-        
+
         // Summing up the field strengths
         fieldstrength_gauss += sqrt(self->data[0]*self->data[0] + self->data[1]*self->data[1] + self->data[2]*self->data[2]);
 
