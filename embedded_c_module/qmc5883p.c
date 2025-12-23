@@ -249,7 +249,7 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
     write_data[0] = STATUS_REG;
 
     while (attemtps < 2){
-        err = i2c_master_transmit_receive(self->device_handle, write_data, 1, read_data, 1, 10);
+        err = i2c_master_transmit_receive(self->device_handle, write_data, 1, read_data, 1, 5);
 
         if (err != ESP_OK){
             mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Unable to read QMC5883P status register: %s"), esp_err_to_name(err));
@@ -259,8 +259,8 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
             return 1;
         }
 
-        // 0.5ms delay
-        wait_micro_s(500);
+        // 0.1ms delay
+        wait_micro_s(100);
         attemtps ++;
     }
 
@@ -283,7 +283,7 @@ static void update_data(qmc5883p_obj_t *self){
     }
 
     // Burst reading the 6 bytes from the sensor
-    err = i2c_master_transmit_receive(self->device_handle, write_data, 1, read_data, 6, 10);
+    err = i2c_master_transmit_receive(self->device_handle, write_data, 1, read_data, 6, 5);
 
     if (err != ESP_OK){
         mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Unable to read QMC5883P data register: %s"), esp_err_to_name(err));
@@ -332,73 +332,82 @@ static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, 
      * Collects a complete data set for all angles around each magnetometer axis
      * This data can then be used to calibrate the magnetometer
     */
-    uint8_t xcomplete = 0, ycomplete = 0, zcomplete = 0;
-    uint16_t xcounter = 0, ycounter = 0, zcounter = 0;
-    float *xdata = NULL;
-    float *ydata = NULL;
-    float *zdata = NULL;
+    uint8_t axescomplete[3] = {0, 0, 0};
+    int16_t headpos[3] = {-1, -1, -1};
+    uint16_t listlengths[3] = {0, 0, 0};
+    float* xdata = malloc(CALIBRATION_DATA_LIST_LENGTHS*FLOAT_SIZE);
+    float* ydata = malloc(CALIBRATION_DATA_LIST_LENGTHS*FLOAT_SIZE);
+    float* zdata = malloc(CALIBRATION_DATA_LIST_LENGTHS*FLOAT_SIZE);
+    float init_values[3];
+
+    // Checking memory allocation
+    if (xdata == NULL || ydata == NULL || zdata == NULL){
+        free(xdata);
+        free(ydata);
+        free(zdata);
+        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - Out of memory"));
+    }
 
     log_func("Begin compass rotation\n");
 
+    // Finding starting magnetometer readings
+    update_data(self);
+    init_values[0] = self->data[0];
+    init_values[1] = self->data[1];
+    init_values[2] = self->data[2];
+
     // This loops for as long as all the axes don't have complete data
-    while (!(xcomplete && ycomplete && zcomplete)){
+    while (!(axescomplete[0] && axescomplete[1] && axescomplete[2])){
         update_data(self);
 
-        // If each axis has incomplete data, it reallocates memory to the data arrays and adds the data points to the new arrays
-        if (xcomplete == 0){
-            xcounter ++;
-            xdata = (float *)realloc(xdata, xcounter*FLOAT_SIZE);
+        // If each axis has incomplete data, it adds a new data point to the data arrays (circular buffer types)
+        if (axescomplete[0] == 0){
+            headpos[0] ++;
+            headpos[0] %= CALIBRATION_DATA_LIST_LENGTHS;
 
-            if (xdata == NULL){
-                // Error: out of memory
-                free(ydata);
-                free(zdata);
-                mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
+            if (listlengths[0] < CALIBRATION_DATA_LIST_LENGTHS){
+                listlengths[0] ++;
             }
 
-            xdata[xcounter-1] = self->data[0];
+            xdata[headpos[0]] = self->data[0];
 
             // Termination conditions for each axis: determines whether each axis has had a complete rotation and returned to starting point
-            if ((list_values_range(xdata, xcounter) > 1.5*fieldstrength) && (fabs(xdata[xcounter-1] - xdata[0]) < 0.1)){
-                xcomplete = 1;
+            if ((list_values_range(xdata, listlengths[0]) > 1.5*fieldstrength) && (fabs(xdata[headpos[0]] - init_values[0]) < 0.1)){
+                axescomplete[0] = 1;
                 log_func("X-axis complete\n");
             }
         }
 
-        if (ycomplete == 0){
-            ycounter ++;
-            ydata = (float *)realloc(ydata, ycounter*FLOAT_SIZE);
+        if (axescomplete[1] == 0){
+            headpos[1] ++;
+            headpos[1] %= CALIBRATION_DATA_LIST_LENGTHS;
 
-            if (ydata == NULL){
-                // Error: out of memory
-                free(xdata);
-                free(zdata);
-                mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
+            if (listlengths[1] < CALIBRATION_DATA_LIST_LENGTHS){
+                listlengths[1] ++;
             }
 
-            ydata[ycounter-1] = self->data[1];
+            ydata[headpos[1]] = self->data[1];
 
-            if ((list_values_range(ydata, ycounter) > 1.5*fieldstrength) && (fabs(ydata[ycounter-1] - ydata[0]) < 0.1)){
-                ycomplete = 1;
+            // Termination conditions for each axis: determines whether each axis has had a complete rotation and returned to starting point
+            if ((list_values_range(ydata, listlengths[1]) > 1.5*fieldstrength) && (fabs(ydata[headpos[1]] - init_values[1]) < 0.1)){
+                axescomplete[1] = 1;
                 log_func("Y-axis complete\n");
             }
         }
 
-        if (zcomplete == 0){
-            zcounter ++;
-            zdata = (float *)realloc(zdata, zcounter*FLOAT_SIZE);
+        if (axescomplete[2] == 0){
+            headpos[2] ++;
+            headpos[2] %= CALIBRATION_DATA_LIST_LENGTHS;
 
-            if (zdata == NULL){
-                // Error: out of memory
-                free(xdata);
-                free(ydata);
-                mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
+            if (listlengths[2] < CALIBRATION_DATA_LIST_LENGTHS){
+                listlengths[2] ++;
             }
 
-            zdata[zcounter-1] = self->data[2];
+            zdata[headpos[2]] = self->data[2];
 
-            if ((list_values_range(zdata, zcounter) > 1.5*fieldstrength) && (fabs(zdata[zcounter-1] - zdata[0]) < 0.1)){
-                zcomplete = 1;
+            // Termination conditions for each axis: determines whether each axis has had a complete rotation and returned to starting point
+            if ((list_values_range(zdata, listlengths[2]) > 1.5*fieldstrength) && (fabs(zdata[headpos[2]] - init_values[2]) < 0.1)){
+                axescomplete[2] = 1;
                 log_func("Z-axis complete\n");
             }
         }
@@ -411,9 +420,9 @@ static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, 
     output->ydata = ydata;
     output->zdata = zdata;
 
-    output->xlength = xcounter;
-    output->ylength = ycounter;
-    output->zlength = zcounter;
+    output->xlength = listlengths[0];
+    output->ylength = listlengths[1];
+    output->zlength = listlengths[2];
 }
 
 static uint8_t is_in_array(float* array, uint16_t length, float item){

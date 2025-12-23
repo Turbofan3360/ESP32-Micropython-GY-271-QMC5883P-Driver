@@ -29,6 +29,7 @@
 #define DEFAULT_I2C_PORT_NUM -1
 #define DEFAULT_I2C_ADDR 0
 #define QMC5883P_I2C_ADDRESS 0x2C
+#define CALIBRATION_DATA_LIST_LENGTHS = 1024
 
 // Object definition
 typedef struct {
@@ -45,12 +46,13 @@ typedef struct {
 
 // Struct used for returning caibration data
 typedef struct {
+    uint16_t xlength;
+    uint16_t ylength;
+    uint16_t zlength;
+
 	float *xdata;
-	uint16_t xlength;
 	float *ydata;
-	uint16_t ylength;
-	float *zdata;
-	uint16_t zlength;
+    float *zdata;
 } calibration_data;
 
 // Function declarations
