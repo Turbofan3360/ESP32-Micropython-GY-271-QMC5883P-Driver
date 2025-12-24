@@ -29,7 +29,7 @@
 #define DEFAULT_I2C_PORT_NUM -1
 #define DEFAULT_I2C_ADDR 0
 #define QMC5883P_I2C_ADDRESS 0x2C
-#define CALIBRATION_DATA_LIST_LENGTHS = 1024
+#define CALIBRATION_DATA_LIST_LENGTHS 1024
 
 // Object definition
 typedef struct {
