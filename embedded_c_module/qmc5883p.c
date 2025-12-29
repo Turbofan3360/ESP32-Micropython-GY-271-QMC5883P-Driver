@@ -249,7 +249,7 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
     write_data[0] = STATUS_REG;
 
     while (attemtps < 2){
-        err = i2c_master_transmit_receive(self->device_handle, write_data, 1, read_data, 1, 5);
+        err = i2c_master_transmit_receive(self->device_handle, write_data, 1, read_data, 1, 10);
 
         if (err != ESP_OK){
             mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Unable to read QMC5883P status register: %s"), esp_err_to_name(err));
@@ -259,8 +259,8 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
             return 1;
         }
 
-        // 0.1ms delay
-        wait_micro_s(100);
+        // 0.5ms delay
+        wait_micro_s(500);
         attemtps ++;
     }
 
@@ -283,7 +283,7 @@ static void update_data(qmc5883p_obj_t *self){
     }
 
     // Burst reading the 6 bytes from the sensor
-    err = i2c_master_transmit_receive(self->device_handle, write_data, 1, read_data, 6, 5);
+    err = i2c_master_transmit_receive(self->device_handle, write_data, 1, read_data, 6, 10);
 
     if (err != ESP_OK){
         mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("Unable to read QMC5883P data register: %s"), esp_err_to_name(err));
@@ -358,6 +358,7 @@ static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, 
 
     // This loops for as long as all the axes don't have complete data
     while (!(axescomplete[0] && axescomplete[1] && axescomplete[2])){
+        // TODO: FIX MEMORY LEAKING HERE IF update_date RAISES ERROR
         update_data(self);
 
         // If each axis has incomplete data, it adds a new data point to the data arrays (circular buffer types)
@@ -441,26 +442,21 @@ static uint8_t is_in_array(float* array, uint16_t length, float item){
     return 0;
 }
 
-static void max_min_average_array(float* array, uint16_t length, uint8_t num_to_average, float* output){
+static void max_min_average_array(float* array, uint16_t length, float* output){
     /**
-     * Finds the num_to_average highest and lowest values in an array
+     * Finds the 5 highest and lowest values in an array
      * The code then averages these highest/lowest values, and returns the average highest/lowest
     */
-    if (num_to_average > length){
-        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Incorrect parameters - can't find more values than are present in the array"));
+    uint8_t num_to_average = 5;
+
+    // Keeping num_to_average safe - even though length < 5 is almost impossible
+    if (length < 5){
+        num_to_average = length;
     }
 
-    float *highest = malloc(num_to_average * FLOAT_SIZE);
-    float *lowest = malloc(num_to_average * FLOAT_SIZE);
+    float highest[5], lowest[5];
     uint16_t i;
     uint8_t j;
-
-    if ((highest == NULL) || (lowest == NULL)){
-        // Error: out of memory
-        free(highest);
-        free(lowest);
-        mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
-    }
 
     output[0] = 0.0f;
     output[1] = 0.0f;
@@ -493,9 +489,6 @@ static void max_min_average_array(float* array, uint16_t length, uint8_t num_to_
 
     output[0] /= num_to_average;
     output[1] /= num_to_average;
-
-    free(highest);
-    free(lowest);
 }
 
 mp_obj_t getdata_raw(mp_obj_t self_in){
@@ -624,9 +617,9 @@ mp_obj_t calibrate(mp_obj_t self_in){
     calibrationrotation_data(self, fieldstrength_gauss, &data);
 
     // Working out the average of the 5 highest/lowest values in each axis' data array
-    max_min_average_array(data.xdata, data.xlength, 5, x_maxmin);
-    max_min_average_array(data.ydata, data.ylength, 5, y_maxmin);
-    max_min_average_array(data.zdata, data.zlength, 5, z_maxmin);
+    max_min_average_array(data.xdata, data.xlength, x_maxmin);
+    max_min_average_array(data.ydata, data.ylength, y_maxmin);
+    max_min_average_array(data.zdata, data.zlength, z_maxmin);
 
     // Calculating the hard offset calibration values
     self->hardcal[0] = (x_maxmin[0] + x_maxmin[1])/2;
