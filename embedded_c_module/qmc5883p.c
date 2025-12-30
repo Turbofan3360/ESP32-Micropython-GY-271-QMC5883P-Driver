@@ -243,12 +243,12 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
      * Checks the QMC5883P's status register to see if the data ready (drdy) bit is set
      * If the drdy bit = 1, there's new sensor data available
     */
-    uint8_t attemtps = 0, write_data[1], read_data[1];
+    uint8_t attempts = 0, write_data[1], read_data[1];
     esp_err_t err;
 
     write_data[0] = STATUS_REG;
 
-    while (attemtps < 2){
+    while (attempts < 2){
         err = i2c_master_transmit_receive(self->device_handle, write_data, 1, read_data, 1, 20);
 
         if (err != ESP_OK){
@@ -261,7 +261,7 @@ static uint8_t check_drdy(qmc5883p_obj_t *self){
 
         // 0.5ms delay
         wait_micro_s(500);
-        attemtps ++;
+        attempts ++;
     }
 
     return 0;
@@ -311,20 +311,8 @@ static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, 
      * This data can then be used to calibrate the magnetometer
     */
     uint8_t axescomplete[3] = {0, 0, 0};
-    int16_t headpos[3] = {-1, -1, -1};
-    uint16_t listlengths[3] = {0, 0, 0};
-    float* xdata = malloc(CALIBRATION_DATA_LIST_LENGTHS*FLOAT_SIZE);
-    float* ydata = malloc(CALIBRATION_DATA_LIST_LENGTHS*FLOAT_SIZE);
-    float* zdata = malloc(CALIBRATION_DATA_LIST_LENGTHS*FLOAT_SIZE);
+    uint64_t start = esp_timer_get_time();
     float init_values[3], max_vals[3] = {0, 0, 0}, min_vals[3] = {0, 0, 0};
-
-    // Checking memory allocation
-    if (xdata == NULL || ydata == NULL || zdata == NULL){
-        free(xdata);
-        free(ydata);
-        free(zdata);
-        mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - Out of memory"));
-    }
 
     log_func("Begin compass rotation\n");
 
@@ -336,19 +324,15 @@ static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, 
 
     // This loops for as long as all the axes don't have complete data
     while (!(axescomplete[0] && axescomplete[1] && axescomplete[2])){
-        // TODO: FIX MEMORY LEAKING HERE IF update_date RAISES ERROR
+        // Times out after 2 minutes
+        if ((esp_timer_get_time()-start) > CALIBRATION_TIMEOUT_MICROSEC){
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("Calibration timeout"));
+        }
+
         update_data(self);
 
         // If each axis has incomplete data, it adds a new data point to the data arrays (circular buffer types)
         if (axescomplete[0] == 0){
-            headpos[0] = (headpos[0]+1)%CALIBRATION_DATA_LIST_LENGTHS;
-
-            if (listlengths[0] < CALIBRATION_DATA_LIST_LENGTHS){
-                listlengths[0] ++;
-            }
-
-            xdata[headpos[0]] = self->data[0];
-
             // Tracking max/min values
             if (self->data[0] > max_vals[0]){
                 max_vals[0] = self->data[0];
@@ -358,21 +342,13 @@ static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, 
             }
 
             // Termination conditions for each axis: determines whether each axis has had a complete rotation and returned to starting point
-            if ((max_vals[0]-min_vals[0] > 1.5*fieldstrength) && (fabs(xdata[headpos[0]] - init_values[0]) < 0.1)){
+            if ((max_vals[0]-min_vals[0] > CALIBRATION_FIELD_RANGE_TOLERANCE*fieldstrength) && (fabs(self->data[0] - init_values[0]) < CALIBRATION_RETURN_TOLERANCE)){
                 axescomplete[0] = 1;
                 log_func("X-axis complete\n");
             }
         }
 
         if (axescomplete[1] == 0){
-            headpos[1] = (headpos[1]+1)%CALIBRATION_DATA_LIST_LENGTHS;
-
-            if (listlengths[1] < CALIBRATION_DATA_LIST_LENGTHS){
-                listlengths[1] ++;
-            }
-
-            ydata[headpos[1]] = self->data[1];
-
             // Tracking max/min values
             if (self->data[1] > max_vals[1]){
                 max_vals[1] = self->data[1];
@@ -382,21 +358,13 @@ static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, 
             }
 
             // Termination conditions for each axis: determines whether each axis has had a complete rotation and returned to starting point
-            if ((max_vals[1]-min_vals[1] > 1.5*fieldstrength) && (fabs(ydata[headpos[1]] - init_values[1]) < 0.1)){
+            if ((max_vals[1]-min_vals[1] > CALIBRATION_FIELD_RANGE_TOLERANCE*fieldstrength) && (fabs(self->data[1] - init_values[1]) < CALIBRATION_RETURN_TOLERANCE)){
                 axescomplete[1] = 1;
                 log_func("Y-axis complete\n");
             }
         }
 
         if (axescomplete[2] == 0){
-            headpos[2] = (headpos[2]+1)%CALIBRATION_DATA_LIST_LENGTHS;
-
-            if (listlengths[2] < CALIBRATION_DATA_LIST_LENGTHS){
-                listlengths[2] ++;
-            }
-
-            zdata[headpos[2]] = self->data[2];
-
             // Tracking max/min values
             if (self->data[2] > max_vals[2]){
                 max_vals[2] = self->data[2];
@@ -406,7 +374,7 @@ static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, 
             }
 
             // Termination conditions for each axis: determines whether each axis has had a complete rotation and returned to starting point
-            if ((max_vals[2]-min_vals[2] > 1.5*fieldstrength) && (fabs(zdata[headpos[2]] - init_values[2]) < 0.1)){
+            if ((max_vals[2]-min_vals[2] > CALIBRATION_FIELD_RANGE_TOLERANCE*fieldstrength) && (fabs(self->data[2] - init_values[2]) < CALIBRATION_RETURN_TOLERANCE)){
                 axescomplete[2] = 1;
                 log_func("Z-axis complete\n");
             }
@@ -415,79 +383,17 @@ static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, 
         wait_micro_s(10000);
     }
 
-    // Putting all the collected data into the struct, which is then returned
-    output->xdata = xdata;
-    output->ydata = ydata;
-    output->zdata = zdata;
+    // Stashing maximum/minimum datapoints in the output struct
+    output->xmaxmin[0] = max_vals[0];
+    output->xmaxmin[1] = min_vals[0];
 
-    output->xlength = listlengths[0];
-    output->ylength = listlengths[1];
-    output->zlength = listlengths[2];
-}
+    output->ymaxmin[0] = max_vals[1];
+    output->ymaxmin[1] = min_vals[1];
 
-static uint8_t is_in_array(float* array, uint16_t length, float item){
-    /**
-     * Utility to confirm whether or not a given item is present in an array
-    */
-    uint8_t i;
+    output->zmaxmin[0] = max_vals[2];
+    output->zmaxmin[1] = min_vals[2];
 
-    // Utility to check if an item appears in an array
-    for (i = 0; i < length; i++){
-        if (array[i] == item){
-            return 1;
-        }
-    }
-
-    return 0;
-}
-
-static void max_min_average_array(float* array, uint16_t length, float* output){
-    /**
-     * Finds the 5 highest and lowest values in an array
-     * The code then averages these highest/lowest values, and returns the average highest/lowest
-    */
-    uint8_t num_to_average = 5;
-
-    // Keeping num_to_average safe - even though length < 5 is almost impossible
-    if (length < 5){
-        num_to_average = length;
-    }
-
-    float highest[5], lowest[5];
-    uint16_t i;
-    uint8_t j;
-
-    output[0] = 0.0f;
-    output[1] = 0.0f;
-
-    // Looking for the 5 highest and lowest values in the given array
-    for (j = 0; j < num_to_average; j++){
-        float l = INFINITY;
-        float h = -INFINITY;
-
-        // Finds the highest/lowest values in an array (whilst making sure the values aren't already in the list of the 5 highest/lowest values)
-        for (i = 0; i < length; i++){
-            if ((array[i] > h) && (is_in_array(highest, j, array[i]) == 0)){
-                h = array[i];
-            }
-
-            if ((array[i] < l) && (is_in_array(lowest, j, array[i]) == 0)){
-                l = array[i];
-            }
-        }
-
-        highest[j] = h;
-        lowest[j] = l;
-    }
-
-    // Sums the arrays and figures out the average highest/lowest value
-    for (i = 0; i < num_to_average; i++){
-        output[0] += highest[i];
-        output[1] += lowest[i];
-    }
-
-    output[0] /= num_to_average;
-    output[1] /= num_to_average;
+    return;
 }
 
 mp_obj_t getdata_raw(mp_obj_t self_in){
@@ -615,22 +521,17 @@ mp_obj_t calibrate(mp_obj_t self_in){
     // Getting a complete axis of data from each magnetometer axis
     calibrationrotation_data(self, fieldstrength_gauss, &data);
 
-    // Working out the average of the 5 highest/lowest values in each axis' data array
-    max_min_average_array(data.xdata, data.xlength, x_maxmin);
-    max_min_average_array(data.ydata, data.ylength, y_maxmin);
-    max_min_average_array(data.zdata, data.zlength, z_maxmin);
-
     // Calculating the hard offset calibration values
-    self->hardcal[0] = (x_maxmin[0] + x_maxmin[1])/2;
-    self->hardcal[1] = (y_maxmin[0] + y_maxmin[1])/2;
-    self->hardcal[2] = (z_maxmin[0] + z_maxmin[1])/2;
+    self->hardcal[0] = (data.xmaxmin[0] + data.xmaxmin[1])/2;
+    self->hardcal[1] = (data.ymaxmin[0] + data.ymaxmin[1])/2;
+    self->hardcal[2] = (data.zmaxmin[0] + data.zmaxmin[1])/2;
 
     log_func("Hard iron calibration calculated\n");
 
     // Calculating the soft offset calibration values
-    xoffset = (x_maxmin[0] - x_maxmin[1])/2;
-    yoffset = (y_maxmin[0] - y_maxmin[1])/2;
-    zoffset = (z_maxmin[0] - z_maxmin[1])/2;
+    xoffset = (data.xmaxmin[0] - data.xmaxmin[1])/2;
+    yoffset = (data.ymaxmin[0] - data.ymaxmin[1])/2;
+    zoffset = (data.zmaxmin[0] - data.zmaxmin[1])/2;
     avg_offset = (xoffset + yoffset + zoffset)/3;
 
     self->softcal[0] = avg_offset/xoffset;
@@ -638,10 +539,6 @@ mp_obj_t calibrate(mp_obj_t self_in){
     self->softcal[2] = avg_offset/zoffset;
 
     log_func("Soft iron calibration calculated\n");
-
-    free(data.xdata);
-    free(data.ydata);
-    free(data.zdata);
 
     return mp_const_none;
 }

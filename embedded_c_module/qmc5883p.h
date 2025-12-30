@@ -25,11 +25,13 @@
 // Constant definitions
 #define M_PI 3.14159265358979323846
 #define RAD_TO_DEG (180.0/M_PI)
-#define FLOAT_SIZE sizeof(float)
 #define DEFAULT_I2C_PORT_NUM -1
 #define DEFAULT_I2C_ADDR 0
 #define QMC5883P_I2C_ADDRESS 0x2C
-#define CALIBRATION_DATA_LIST_LENGTHS 1024
+
+#define CALIBRATION_TIMEOUT_MICROSEC 120e6
+#define CALIBRATION_FIELD_RANGE_TOLERANCE 1.5f
+#define CALIBRATION_RETURN_TOLERANCE 0.1f
 
 // Object definition
 typedef struct {
@@ -46,13 +48,9 @@ typedef struct {
 
 // Struct used for returning caibration data
 typedef struct {
-    uint16_t xlength;
-    uint16_t ylength;
-    uint16_t zlength;
-
-	float *xdata;
-	float *ydata;
-    float *zdata;
+    float xmaxmin[2];
+    float ymaxmin[2];
+    float zmaxmin[2];
 } calibration_data;
 
 // Function declarations
@@ -64,9 +62,7 @@ static void mparray_to_float(mp_obj_t array, float* output);
 static void normalize_vector(float* vector, float* output);
 static void heading_vector(qmc5883p_obj_t* self, float* quaternion, float* output);
 static void quat_rotate_mag_readings(qmc5883p_obj_t* self, float* quaternion, float* output);
-static void max_min_average_array(float* array, uint16_t length, float* output);
 static void calibrationrotation_data(qmc5883p_obj_t *self, float fieldstrength, calibration_data* output);
-static uint8_t is_in_array(float* array, uint16_t length, float item);
 static uint8_t check_drdy(qmc5883p_obj_t *self);
 
 extern const mp_obj_type_t qmc5883p_type;
