@@ -499,7 +499,6 @@ mp_obj_t calibrate(mp_obj_t self_in){
     calibration_data data;
     float fieldstrength_gauss = 0.0f;
     float xoffset, yoffset, zoffset, avg_offset;
-    float x_maxmin[2], y_maxmin[2], z_maxmin[2];
     uint8_t i;
 
     log_func("Calibrating...\n");
